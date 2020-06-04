@@ -38,22 +38,18 @@ int main(void)
 	printf("Main enter \n");
 
 	usbdev_t *usbdev = usbdev_get_ctx(0);
-    assert(usbdev);
-
-    usbus_init(&usbus, usbdev);
-
-    usb_hid_stdio_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
-
-    printf("Starting usbus thread \n");
-
-    usbus_create(_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
+  assert(usbdev);
+  usbus_init(&usbus, usbdev);
+  usb_hid_stdio_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
+  printf("Starting usbus thread \n");
+  usbus_create(_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
+  
+  uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
+  for(;;) {
+    memset(buffer, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+    usb_hid_stdio_read(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+    hid_ctap_handle_packet(buffer);
+  }
     
-    uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
-    for(;;) {
-      memset(buffer, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
-      usb_hid_stdio_read(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
-      hid_ctap_handle_packet(buffer);
-    }
-    
-    return 0;
+  return 0;
 }
