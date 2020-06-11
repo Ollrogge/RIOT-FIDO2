@@ -9,54 +9,103 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
-
-//todo change
-static uint32_t g_cid;
+//todo: how many concurrent devices should be allowed ?
+static usb_hid_ctap_cid_t cids[USB_HID_CTAP_CIDS_MAX];
 
 ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
 static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
 
+static void handle_initialization(usb_hid_ctap_pkt_t *pkt);
+static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce);
+
+static int8_t add_cid(uint32_t cid);
+static uint32_t get_new_cid(void);
+
 
 static uint32_t get_new_cid(void)
 {
+    //channel id 0 is reserved
     static uint32_t cid = 1;
 
     return cid++;
 }
 
-static int is_init_paket(usb_hid_ctap_pkt_t* pkt)
+static int8_t add_cid(uint32_t cid)
 {
-    return (pkt->pkt.init.cmd == (USB_HID_CTAP_INIT_PACKET | USB_HID_CTAP_COMMAND_INIT));
+    for (int i = 0; i < USB_HID_CTAP_CIDS_MAX; i++) {
+        if (!cids[i].taken) {
+            cids[i].taken = 1;
+            cids[i].cid = cid;
+
+            return 0;
+        }
+    }
+    return -1;
 }
 
-static int is_broadcast_paket(usb_hid_ctap_pkt_t* pkt)
+/*
+static int8_t delete_cid(uint32_t cid)
 {
-    return (pkt->cid == USB_HID_CTAP_BROADCAST_CID);
-}
+    for (int i = 0; i < USB_HID_CTAP_CIDS_MAX; i++) {
+        if (cids[i].cid == cid) {
+            cids[i].taken = 0;
+            cids[i].cid = 0;
 
+            return 0;
+        }
+    }
+
+    return -1;
+}
+*/
 
 void hid_ctap_handle_packet(uint8_t* pkt_raw)
 {
     usb_hid_ctap_pkt_t *pkt = (usb_hid_ctap_pkt_t*)pkt_raw;
 
-    // To allocate a new channel, the requesting application SHALL use the broadcast channel 
+    // To allocate a new channel, the requesting application SHALL use the broadcast channel
     // CTAPHID_BROADCAST_CID (0xFFFFFFFF)
 
     DEBUG("CTAP_HID: CID: %04lx \n", pkt->cid);
-    DEBUG("CTAP_HID: cmd: %02x \n", pkt->pkt.init.cmd);
+    DEBUG("CTAP_HID: cmd: %02x \n", pkt->init.cmd);
 
-    if (is_init_paket(pkt)) {
+    uint8_t cmd = pkt->init.cmd;
 
-        if (is_broadcast_paket(pkt)) {
-            DEBUG("USB_HID_CTAP: adding new cid \n");
+    switch(cmd) {
+        case USB_HID_CTAP_COMMAND_INIT:
+            handle_initialization(pkt);
+            break;
+        case USB_HID_CTAP_COMMAND_CBOR:
+            DEBUG("CTAP_HID: CBOR COMMAND \n");
+            break;
+        default:
+            DEBUG("Ctaphid: unknown command \n");
 
-            uint32_t cid_old = pkt->cid;
-            uint32_t cid_new = get_new_cid();
-            g_cid = cid_new;
+    }
+}
 
-            send_init_response(cid_old, cid_new, pkt->pkt.init.payload);
+static void handle_initialization(usb_hid_ctap_pkt_t *pkt)
+{
+    uint8_t cmd;
+    uint32_t cid;
+    uint32_t cid_new;
+
+    if (pkt->cid == 0) {
+        cmd = USB_HID_CTAP_ERROR_INVALID_CHANNEL;
+        cid = pkt->cid;
+        hid_ctap_write(cmd, cid, NULL, 0);
+    }
+    else if (pkt->cid == USB_HID_CTAP_BROADCAST_CID) {
+        cid_new = get_new_cid();
+        if (add_cid(cid_new) == -1) {
+            cmd = USB_HID_CTAP_ERROR_CHANNEL_BUSY;
+            cid = pkt->cid;
+            hid_ctap_write(cmd, cid, NULL, 0);
+        }
+        else {
+            send_init_response(pkt->cid, cid_new, pkt->init.payload);
         }
     }
 }
@@ -75,10 +124,12 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
     resp.version_minor = 0; //?
     resp.build_version = 0; //?
 
+    uint8_t command = (USB_HID_CTAP_INIT_PACKET | USB_HID_CTAP_COMMAND_INIT);
+
     // USB_HID_CTAP_CAPABILITY_NMSG because no CTAP1 / U2F for now
     resp.capabilities = USB_HID_CTAP_CAPABILITY_CBOR | USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
 
-    hid_ctap_write(USB_HID_CTAP_COMMAND_INIT, cid_old, &resp, sizeof(usb_hid_ctap_init_resp_t));
+    hid_ctap_write(command, cid_old, &resp, sizeof(usb_hid_ctap_init_resp_t));
 }
 
 static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
