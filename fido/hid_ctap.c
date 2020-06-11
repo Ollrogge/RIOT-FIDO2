@@ -9,6 +9,9 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
+#include "xtimer.h"
+#include "board.h"
+
 //todo: how many concurrent devices should be allowed ?
 static usb_hid_ctap_cid_t cids[USB_HID_CTAP_CIDS_MAX];
 
@@ -17,7 +20,8 @@ ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
 static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
 
-static void handle_initialization(usb_hid_ctap_pkt_t *pkt);
+static void initialize(usb_hid_ctap_pkt_t *pkt);
+static void wink(usb_hid_ctap_pkt_t *pkt);
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce);
 
 static int8_t add_cid(uint32_t cid);
@@ -75,10 +79,15 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
 
     switch(cmd) {
         case USB_HID_CTAP_COMMAND_INIT:
-            handle_initialization(pkt);
+            initialize(pkt);
             break;
         case USB_HID_CTAP_COMMAND_CBOR:
+            //todo: CBOR msg = FIDO specific messages
             DEBUG("CTAP_HID: CBOR COMMAND \n");
+            break;
+        case USB_HID_CTAP_COMMAND_WINK:
+            DEBUG("CTAP_HID: wink \n");
+            wink(pkt);
             break;
         default:
             DEBUG("Ctaphid: unknown command \n");
@@ -86,7 +95,34 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
     }
 }
 
-static void handle_initialization(usb_hid_ctap_pkt_t *pkt)
+static void wink(usb_hid_ctap_pkt_t *pkt)
+{
+    uint32_t delay = 400000;
+    //led3 before led2 due to led layout on nRF52840DK
+    for (int i = 1; i <= 8; i++) {
+#ifdef LED0_TOGGLE
+        LED0_TOGGLE;
+        xtimer_usleep(delay);
+#endif
+#ifdef LED1_TOGGLE
+        LED1_TOGGLE;
+        xtimer_usleep(delay);
+#endif
+#ifdef LED3_TOGGLE
+        LED3_TOGGLE;
+        xtimer_usleep(delay);
+#endif
+#ifdef LED2_TOGGLE
+        LED2_TOGGLE;
+        xtimer_usleep(delay);
+#endif
+        delay /= 2;
+    }
+
+    hid_ctap_write(pkt->init.cmd, pkt->cid, NULL, 0);
+}
+
+static void initialize(usb_hid_ctap_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
@@ -127,7 +163,8 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
     uint8_t command = (USB_HID_CTAP_INIT_PACKET | USB_HID_CTAP_COMMAND_INIT);
 
     // USB_HID_CTAP_CAPABILITY_NMSG because no CTAP1 / U2F for now
-    resp.capabilities = USB_HID_CTAP_CAPABILITY_CBOR | USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
+    //USB_HID_CTAP_CAPABILITY_CBOR | USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
+    resp.capabilities = USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
 
     hid_ctap_write(command, cid_old, &resp, sizeof(usb_hid_ctap_init_resp_t));
 }
