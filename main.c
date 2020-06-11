@@ -16,7 +16,7 @@ static uint8_t report_desc_ctap[] = {
   0x95, 0x40, // HID_ReportCount ( HID_INPUT_REPORT_BYTES ),
   0x81, 0x02, // HID_Input ( HID_Data | HID_Absolute | HID_Variable ),
   0x09, 0x21, // HID_Usage ( FIDO_USAGE_DATA_OUT ),
-  0x15, 0x00, // HID_LogicalMin ( 0 ), 
+  0x15, 0x00, // HID_LogicalMin ( 0 ),
   0x26, 0xFF, 0x00, // HID_LogicalMaxS ( 0xff ),
   0x75, 0x08, // HID_ReportSize ( 8 ),
   0x95, 0x40, // HID_ReportCount ( HID_OUTPUT_REPORT_BYTES ),
@@ -43,13 +43,13 @@ int main(void)
   usb_hid_stdio_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
   printf("Starting usbus thread \n");
   usbus_create(_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
-  
+
   uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
   for(;;) {
     memset(buffer, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     usb_hid_stdio_read(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     hid_ctap_handle_packet(buffer);
   }
-    
+
   return 0;
 }
