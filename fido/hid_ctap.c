@@ -89,9 +89,12 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
             DEBUG("CTAP_HID: wink \n");
             wink(pkt);
             break;
+        case USB_HID_CTAP_COMMAND_PING:
+            DEBUG("CTAP_HID: ping \n");
+            hid_ctap_write(pkt->init.cmd, pkt->cid, pkt->init.payload, sizeof(pkt->init.payload));
+            break;
         default:
             DEBUG("Ctaphid: unknown command \n");
-
     }
 }
 
