@@ -20,7 +20,9 @@ ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
 static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
 
-static void initialize(usb_hid_ctap_pkt_t *pkt);
+static void handle_init_packet(usb_hid_ctap_pkt_t *pkt);
+static void handle_cbor_packet(usb_hid_ctap_pkt_t *pkt);
+
 static void wink(usb_hid_ctap_pkt_t *pkt);
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce);
 
@@ -95,7 +97,7 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
 
     switch(cmd) {
         case USB_HID_CTAP_COMMAND_INIT:
-            initialize(pkt);
+            handle_init_packet(pkt);
             break;
         case USB_HID_CTAP_COMMAND_CBOR:
             //todo: CBOR msg = FIDO specific messages
@@ -108,6 +110,9 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
         case USB_HID_CTAP_COMMAND_PING:
             DEBUG("CTAP_HID: ping \n");
             hid_ctap_write(pkt->init.cmd, pkt->cid, pkt->init.payload, sizeof(pkt->init.payload));
+            break;
+        case USB_HID_CTAP_COMMAND_CANCEL:
+            DEBUG("CTAP_HID: cancel \n");
             break;
         default:
             DEBUG("Ctaphid: unknown command \n");
@@ -142,7 +147,7 @@ static void wink(usb_hid_ctap_pkt_t *pkt)
 }
 
 /* CTAP specification (version 20190130) section 8.1.9.1.3 */
-static void initialize(usb_hid_ctap_pkt_t *pkt)
+static void handle_init_packet(usb_hid_ctap_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
@@ -184,6 +189,19 @@ static void initialize(usb_hid_ctap_pkt_t *pkt)
             }
         }
         send_init_response(cid, cid, pkt->init.payload);
+    }
+}
+
+/* CTAP specification (version 20190130) section 8.1.9.1.2 */
+static void handle_cbor_packet(usb_hid_ctap_pkt_t *pkt)
+{
+    uint8_t cmd;
+    uint32_t cid;
+
+    if (get_packet_len(pkt) == 0) {
+        cmd = USB_HID_CTAP_ERROR_INVALID_LEN;
+        cid = pkt->cid;
+        hid_ctap_write(cmd, cid, NULL, 1);
     }
 }
 
