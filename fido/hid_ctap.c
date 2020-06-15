@@ -26,6 +26,7 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
 
 static int8_t add_cid(uint32_t cid);
 static uint32_t get_new_cid(void);
+static uint16_t get_packet_len(usb_hid_ctap_pkt_t* pkt);
 
 
 static uint32_t get_new_cid(void)
@@ -43,6 +44,21 @@ static int8_t add_cid(uint32_t cid)
             cids[i].taken = 1;
             cids[i].cid = cid;
 
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static uint16_t get_packet_len(usb_hid_ctap_pkt_t* pkt)
+{
+    return (uint16_t)((pkt->init.bcnth << 8) | pkt->init.bcntl);
+}
+
+static int8_t cid_exists(uint32_t cid)
+{
+    for (int i = 0; i < USB_HID_CTAP_CIDS_MAX; i++) {
+        if (cids[i].cid == cid) {
             return 0;
         }
     }
@@ -125,27 +141,49 @@ static void wink(usb_hid_ctap_pkt_t *pkt)
     hid_ctap_write(pkt->init.cmd, pkt->cid, NULL, 0);
 }
 
+/* CTAP specification (version 20190130) section 8.1.9.1.3 */
 static void initialize(usb_hid_ctap_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
     uint32_t cid_new;
 
+    /* cid 0 is reserved */
     if (pkt->cid == 0) {
         cmd = USB_HID_CTAP_ERROR_INVALID_CHANNEL;
         cid = pkt->cid;
-        hid_ctap_write(cmd, cid, NULL, 0);
+        hid_ctap_write(cmd, cid, NULL, 1);
     }
+    /* check for len described in standard */
+    else if (get_packet_len(pkt) != 8)
+    {
+        cmd = USB_HID_CTAP_ERROR_INVALID_LEN;
+        cid = pkt->cid;
+        hid_ctap_write(cmd, cid, NULL, 1);
+    }
+    /* create new channel */
     else if (pkt->cid == USB_HID_CTAP_BROADCAST_CID) {
         cid_new = get_new_cid();
+        cid = pkt->cid;
         if (add_cid(cid_new) == -1) {
             cmd = USB_HID_CTAP_ERROR_CHANNEL_BUSY;
-            cid = pkt->cid;
-            hid_ctap_write(cmd, cid, NULL, 0);
+            hid_ctap_write(cmd, cid, NULL, 1);
+            return;
         }
-        else {
-            send_init_response(pkt->cid, cid_new, pkt->init.payload);
+
+        send_init_response(cid, cid_new, pkt->init.payload);
+    }
+    /* synchronize channel */
+    else {
+        cid = pkt->cid;
+        if (cid_exists(cid) == -1) {
+            if (add_cid(cid) == -1) {
+                cmd = USB_HID_CTAP_ERROR_CHANNEL_BUSY;
+                hid_ctap_write(cmd, cid, NULL, 1);
+                return;
+            }
         }
+        send_init_response(cid, cid, pkt->init.payload);
     }
 }
 
