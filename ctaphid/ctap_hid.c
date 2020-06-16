@@ -5,6 +5,7 @@
 
 #include "usb/usbus.h"
 #include "ctap_hid.h"
+#include "ctap.h"
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
@@ -206,6 +207,8 @@ static void handle_cbor_packet(ctap_hid_pkt_t *pkt)
         cid = pkt->cid;
         ctap_hid_write(cmd, cid, &err, sizeof(err));
     }
+
+    ctap_handle_request(pkt->init.payload);
 }
 
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce)
@@ -280,7 +283,7 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
         }
     }
 
-    if (offset >= 0) {
+    if (offset > 0) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
         usb_hid_stdio_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     }

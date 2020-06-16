@@ -5,6 +5,7 @@ BOARD ?= nrf52840dk
 
 RIOTBASE ?= $(CURDIR)/../RIOT-fork
 
+EXTERNAL_MODULE_DIRS += ./ctap
 EXTERNAL_MODULE_DIRS += ./ctaphid
 
 DEVELHELP ?= 1
@@ -14,8 +15,10 @@ USEMODULE += usbus_hid
 USEMODULE += stdio_hid
 USEMODULE += xtimer
 USEMODULE += isrpipe
+USEMODULE += ctap
 USEMODULE += ctaphid
 
+INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/ctap/include
 INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/ctaphid/include
 
 DISABLE_MODULE += auto_init_usbus
