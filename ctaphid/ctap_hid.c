@@ -106,8 +106,8 @@ void ctap_hid_handle_packet(uint8_t* pkt_raw)
             wink(pkt);
             break;
         case CTAP_HID_COMMAND_PING:
-            DEBUG("CTAP_HID: ping \n");
-            ctap_hid_write(pkt->init.cmd, pkt->cid, pkt->init.payload, sizeof(pkt->init.payload));
+            DEBUG("CTAP_HID: ping %d \n", get_packet_len(pkt));
+            ctap_hid_write(pkt->init.cmd, pkt->cid, pkt->init.payload, get_packet_len(pkt));
             break;
         case CTAP_HID_COMMAND_CANCEL:
             DEBUG("CTAP_HID: cancel \n");
@@ -153,24 +153,27 @@ static void handle_init_packet(ctap_hid_pkt_t *pkt)
 
     /* cid 0 is reserved */
     if (pkt->cid == 0) {
-        cmd = CTAP_HID_ERROR_INVALID_CHANNEL;
+        uint8_t err = CTAP_HID_ERROR_INVALID_CHANNEL;
+        cmd = CTAP_HID_COMMAND_ERROR;;
         cid = pkt->cid;
-        ctap_hid_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, &err, sizeof(err));
     }
     /* check for len described in standard */
     else if (get_packet_len(pkt) != 8)
     {
-        cmd = CTAP_HID_ERROR_INVALID_LEN;
+        uint8_t err = CTAP_HID_ERROR_INVALID_LEN;
+        cmd = CTAP_HID_COMMAND_ERROR;
         cid = pkt->cid;
-        ctap_hid_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, &err, sizeof(err));
     }
     /* create new channel */
     else if (pkt->cid == CTAP_HID_BROADCAST_CID) {
         cid_new = get_new_cid();
         cid = pkt->cid;
         if (add_cid(cid_new) == -1) {
-            cmd = CTAP_HID_ERROR_CHANNEL_BUSY;
-            ctap_hid_write(cmd, cid, NULL, 1);
+            uint8_t err = CTAP_HID_ERROR_CHANNEL_BUSY;
+            cmd = CTAP_HID_COMMAND_ERROR;
+            ctap_hid_write(cmd, cid, &err, sizeof(err));
             return;
         }
 
@@ -181,8 +184,9 @@ static void handle_init_packet(ctap_hid_pkt_t *pkt)
         cid = pkt->cid;
         if (cid_exists(cid) == -1) {
             if (add_cid(cid) == -1) {
-                cmd = CTAP_HID_ERROR_CHANNEL_BUSY;
-                ctap_hid_write(cmd, cid, NULL, 1);
+                uint8_t err = CTAP_HID_ERROR_CHANNEL_BUSY;
+                cmd = CTAP_HID_COMMAND_ERROR;
+                ctap_hid_write(cmd, cid, &err, sizeof(err));
                 return;
             }
         }
@@ -197,9 +201,10 @@ static void handle_cbor_packet(ctap_hid_pkt_t *pkt)
     uint32_t cid;
 
     if (get_packet_len(pkt) == 0) {
-        cmd = CTAP_HID_ERROR_INVALID_LEN;
+        uint8_t err = CTAP_HID_ERROR_INVALID_LEN;
+        cmd = CTAP_HID_COMMAND_ERROR;
         cid = pkt->cid;
-        ctap_hid_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, &err, sizeof(err));
     }
 }
 
@@ -234,15 +239,14 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
     int bytes_written = 0;
     uint8_t seq = 0;
 
+    memmove(buf, &cid, sizeof(cid));
+    offset += sizeof(cid);
+    buf[4] = cmd;
+    buf[5] = (size & 0xff00) >> 8;
+    buf[6] = (size & 0xff) >> 0;
+    offset += 3;
+
     if (_data == NULL) {
-        memmove(buf, &cid, sizeof(cid));
-        offset += sizeof(cid);
-
-        buf[4] = cmd;
-        buf[5] = (size & 0xff00) >> 8;
-        buf[6] = (size & 0xff) >> 0;
-        offset += 3;
-
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
         usb_hid_stdio_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
         return;
@@ -276,7 +280,7 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
         }
     }
 
-    if (offset > 0) {
+    if (offset >= 0) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
         usb_hid_stdio_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     }
