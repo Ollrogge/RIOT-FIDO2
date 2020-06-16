@@ -3,7 +3,7 @@
 #include "usb/usbus.h"
 #include "xtimer.h"
 #include "usb/usbus/hid.h"
-#include "hid_ctap.h"
+#include "ctap_hid.h"
 
 static uint8_t report_desc_ctap[] = {
   0x06, 0xD0, 0xF1, // HID_UsagePage ( FIDO_USAGE_PAGE ),
@@ -48,7 +48,7 @@ int main(void)
   for(;;) {
     memset(buffer, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     usb_hid_stdio_read(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
-    hid_ctap_handle_packet(buffer);
+    ctap_hid_handle_packet(buffer);
   }
 
   return 0;

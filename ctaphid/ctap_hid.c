@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "usb/usbus.h"
-#include "hid_ctap.h"
+#include "ctap_hid.h"
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
@@ -13,22 +13,22 @@
 #include "board.h"
 
 //todo: how many concurrent devices should be allowed ?
-static usb_hid_ctap_cid_t cids[USB_HID_CTAP_CIDS_MAX];
+static ctap_hid_cid_t cids[CTAP_HID_CIDS_MAX];
 
 ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
-static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
+static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
 
-static void handle_init_packet(usb_hid_ctap_pkt_t *pkt);
-static void handle_cbor_packet(usb_hid_ctap_pkt_t *pkt);
+static void handle_init_packet(ctap_hid_pkt_t *pkt);
+static void handle_cbor_packet(ctap_hid_pkt_t *pkt);
 
-static void wink(usb_hid_ctap_pkt_t *pkt);
+static void wink(ctap_hid_pkt_t *pkt);
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce);
 
 static int8_t add_cid(uint32_t cid);
 static uint32_t get_new_cid(void);
-static uint16_t get_packet_len(usb_hid_ctap_pkt_t* pkt);
+static uint16_t get_packet_len(ctap_hid_pkt_t* pkt);
 
 
 static uint32_t get_new_cid(void)
@@ -41,7 +41,7 @@ static uint32_t get_new_cid(void)
 
 static int8_t add_cid(uint32_t cid)
 {
-    for (int i = 0; i < USB_HID_CTAP_CIDS_MAX; i++) {
+    for (int i = 0; i < CTAP_HID_CIDS_MAX; i++) {
         if (!cids[i].taken) {
             cids[i].taken = 1;
             cids[i].cid = cid;
@@ -52,14 +52,14 @@ static int8_t add_cid(uint32_t cid)
     return -1;
 }
 
-static uint16_t get_packet_len(usb_hid_ctap_pkt_t* pkt)
+static uint16_t get_packet_len(ctap_hid_pkt_t* pkt)
 {
     return (uint16_t)((pkt->init.bcnth << 8) | pkt->init.bcntl);
 }
 
 static int8_t cid_exists(uint32_t cid)
 {
-    for (int i = 0; i < USB_HID_CTAP_CIDS_MAX; i++) {
+    for (int i = 0; i < CTAP_HID_CIDS_MAX; i++) {
         if (cids[i].cid == cid) {
             return 0;
         }
@@ -83,12 +83,9 @@ static int8_t delete_cid(uint32_t cid)
 }
 */
 
-void hid_ctap_handle_packet(uint8_t* pkt_raw)
+void ctap_hid_handle_packet(uint8_t* pkt_raw)
 {
-    usb_hid_ctap_pkt_t *pkt = (usb_hid_ctap_pkt_t*)pkt_raw;
-
-    // To allocate a new channel, the requesting application SHALL use the broadcast channel
-    // CTAPHID_BROADCAST_CID (0xFFFFFFFF)
+    ctap_hid_pkt_t *pkt = (ctap_hid_pkt_t*)pkt_raw;
 
     DEBUG("CTAP_HID: CID: %04lx \n", pkt->cid);
     DEBUG("CTAP_HID: cmd: %02x \n", pkt->init.cmd);
@@ -96,22 +93,23 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
     uint8_t cmd = pkt->init.cmd;
 
     switch(cmd) {
-        case USB_HID_CTAP_COMMAND_INIT:
+        case CTAP_HID_COMMAND_INIT:
             handle_init_packet(pkt);
             break;
-        case USB_HID_CTAP_COMMAND_CBOR:
+        case CTAP_HID_COMMAND_CBOR:
             //todo: CBOR msg = FIDO specific messages
+            handle_cbor_packet(pkt);
             DEBUG("CTAP_HID: CBOR COMMAND \n");
             break;
-        case USB_HID_CTAP_COMMAND_WINK:
+        case CTAP_HID_COMMAND_WINK:
             DEBUG("CTAP_HID: wink \n");
             wink(pkt);
             break;
-        case USB_HID_CTAP_COMMAND_PING:
+        case CTAP_HID_COMMAND_PING:
             DEBUG("CTAP_HID: ping \n");
-            hid_ctap_write(pkt->init.cmd, pkt->cid, pkt->init.payload, sizeof(pkt->init.payload));
+            ctap_hid_write(pkt->init.cmd, pkt->cid, pkt->init.payload, sizeof(pkt->init.payload));
             break;
-        case USB_HID_CTAP_COMMAND_CANCEL:
+        case CTAP_HID_COMMAND_CANCEL:
             DEBUG("CTAP_HID: cancel \n");
             break;
         default:
@@ -119,7 +117,7 @@ void hid_ctap_handle_packet(uint8_t* pkt_raw)
     }
 }
 
-static void wink(usb_hid_ctap_pkt_t *pkt)
+static void wink(ctap_hid_pkt_t *pkt)
 {
     uint32_t delay = 400000;
     //led3 before led2 due to led layout on nRF52840DK
@@ -143,11 +141,11 @@ static void wink(usb_hid_ctap_pkt_t *pkt)
         delay /= 2;
     }
 
-    hid_ctap_write(pkt->init.cmd, pkt->cid, NULL, 0);
+    ctap_hid_write(pkt->init.cmd, pkt->cid, NULL, 0);
 }
 
 /* CTAP specification (version 20190130) section 8.1.9.1.3 */
-static void handle_init_packet(usb_hid_ctap_pkt_t *pkt)
+static void handle_init_packet(ctap_hid_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
@@ -155,24 +153,24 @@ static void handle_init_packet(usb_hid_ctap_pkt_t *pkt)
 
     /* cid 0 is reserved */
     if (pkt->cid == 0) {
-        cmd = USB_HID_CTAP_ERROR_INVALID_CHANNEL;
+        cmd = CTAP_HID_ERROR_INVALID_CHANNEL;
         cid = pkt->cid;
-        hid_ctap_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, NULL, 1);
     }
     /* check for len described in standard */
     else if (get_packet_len(pkt) != 8)
     {
-        cmd = USB_HID_CTAP_ERROR_INVALID_LEN;
+        cmd = CTAP_HID_ERROR_INVALID_LEN;
         cid = pkt->cid;
-        hid_ctap_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, NULL, 1);
     }
     /* create new channel */
-    else if (pkt->cid == USB_HID_CTAP_BROADCAST_CID) {
+    else if (pkt->cid == CTAP_HID_BROADCAST_CID) {
         cid_new = get_new_cid();
         cid = pkt->cid;
         if (add_cid(cid_new) == -1) {
-            cmd = USB_HID_CTAP_ERROR_CHANNEL_BUSY;
-            hid_ctap_write(cmd, cid, NULL, 1);
+            cmd = CTAP_HID_ERROR_CHANNEL_BUSY;
+            ctap_hid_write(cmd, cid, NULL, 1);
             return;
         }
 
@@ -183,8 +181,8 @@ static void handle_init_packet(usb_hid_ctap_pkt_t *pkt)
         cid = pkt->cid;
         if (cid_exists(cid) == -1) {
             if (add_cid(cid) == -1) {
-                cmd = USB_HID_CTAP_ERROR_CHANNEL_BUSY;
-                hid_ctap_write(cmd, cid, NULL, 1);
+                cmd = CTAP_HID_ERROR_CHANNEL_BUSY;
+                ctap_hid_write(cmd, cid, NULL, 1);
                 return;
             }
         }
@@ -193,42 +191,42 @@ static void handle_init_packet(usb_hid_ctap_pkt_t *pkt)
 }
 
 /* CTAP specification (version 20190130) section 8.1.9.1.2 */
-static void handle_cbor_packet(usb_hid_ctap_pkt_t *pkt)
+static void handle_cbor_packet(ctap_hid_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
 
     if (get_packet_len(pkt) == 0) {
-        cmd = USB_HID_CTAP_ERROR_INVALID_LEN;
+        cmd = CTAP_HID_ERROR_INVALID_LEN;
         cid = pkt->cid;
-        hid_ctap_write(cmd, cid, NULL, 1);
+        ctap_hid_write(cmd, cid, NULL, 1);
     }
 }
 
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce)
 {
-    DEBUG("USB_HID_CTAP: send_init_response %d\n ", sizeof(usb_hid_ctap_init_resp_t));
+    DEBUG("USB_HID_CTAP: send_init_response %d\n ", sizeof(ctap_hid_init_resp_t));
 
-    usb_hid_ctap_init_resp_t resp;
-    memset(&resp, 0, sizeof(usb_hid_ctap_init_resp_t));
+    ctap_hid_init_resp_t resp;
+    memset(&resp, 0, sizeof(ctap_hid_init_resp_t));
 
     resp.cid = cid_new;
     memmove(resp.nonce, nonce, 8);
-    resp.protocol_version = USB_HID_CTAP_PROTOCOL_VERSION;
+    resp.protocol_version = CTAP_HID_PROTOCOL_VERSION;
     resp.version_major = 0; //?
     resp.version_minor = 0; //?
     resp.build_version = 0; //?
 
-    uint8_t command = (USB_HID_CTAP_INIT_PACKET | USB_HID_CTAP_COMMAND_INIT);
+    uint8_t command = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
 
     // USB_HID_CTAP_CAPABILITY_NMSG because no CTAP1 / U2F for now
     //USB_HID_CTAP_CAPABILITY_CBOR | USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
-    resp.capabilities = USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
+    resp.capabilities = CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
 
-    hid_ctap_write(command, cid_old, &resp, sizeof(usb_hid_ctap_init_resp_t));
+    ctap_hid_write(command, cid_old, &resp, sizeof(ctap_hid_init_resp_t));
 }
 
-static void hid_ctap_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
+static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 {
     uint8_t * data = (uint8_t *)_data;
     uint8_t buf[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];

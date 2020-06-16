@@ -4,23 +4,19 @@ APPLICATION=FIDO2
 BOARD ?= nrf52840dk
 
 RIOTBASE ?= $(CURDIR)/../RIOT-fork
-EXTERNAL_MODULE_DIRS += ./fido
 
-#USEMODULE += shell
+EXTERNAL_MODULE_DIRS += ./ctaphid
 
 DEVELHELP ?= 1
 
 USEMODULE += usbus
-#USEMODULE += auto_init_usbus
-#USEMODULE += stdio_cdc_acm
-#USEMODULE += usbus_cdc_ecm
 USEMODULE += usbus_hid
 USEMODULE += stdio_hid
 USEMODULE += xtimer
 USEMODULE += isrpipe
-USEMODULE += fido
+USEMODULE += ctaphid
 
-INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/fido/include
+INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/ctaphid/include
 
 DISABLE_MODULE += auto_init_usbus
 

@@ -1,4 +1,4 @@
-MODULE = fido
-SRC = hid_ctap.c
+MODULE = ctaphid
+SRC = ctap_hid.c
 
 include $(RIOTBASE)/Makefile.base
