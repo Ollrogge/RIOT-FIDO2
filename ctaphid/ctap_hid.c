@@ -6,6 +6,7 @@
 #include "usb/usbus.h"
 #include "ctap_hid.h"
 #include "ctap.h"
+#include "cbor.h"
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
@@ -99,8 +100,8 @@ void ctap_hid_handle_packet(uint8_t* pkt_raw)
             break;
         case CTAP_HID_COMMAND_CBOR:
             //todo: CBOR msg = FIDO specific messages
-            handle_cbor_packet(pkt);
             DEBUG("CTAP_HID: CBOR COMMAND \n");
+            handle_cbor_packet(pkt);
             break;
         case CTAP_HID_COMMAND_WINK:
             DEBUG("CTAP_HID: wink \n");
@@ -200,15 +201,32 @@ static void handle_cbor_packet(ctap_hid_pkt_t *pkt)
 {
     uint8_t cmd;
     uint32_t cid;
+    ctap_resp_t resp;
+    uint8_t err;
+    size_t size;
 
     if (get_packet_len(pkt) == 0) {
-        uint8_t err = CTAP_HID_ERROR_INVALID_LEN;
+        err = CTAP_HID_ERROR_INVALID_LEN;
         cmd = CTAP_HID_COMMAND_ERROR;
         cid = pkt->cid;
         ctap_hid_write(cmd, cid, &err, sizeof(err));
+        return;
     }
 
-    ctap_handle_request(pkt->init.payload);
+    memset(&resp, 0, sizeof(ctap_resp_t));
+
+    size = ctap_handle_request(pkt->init.payload, &resp);
+    cmd = pkt->init.cmd;
+    cid = pkt->cid;
+
+    DEBUG("cbor answer size: %u \n", size);
+
+    if (resp.status == CTAP2_OK) {
+        ctap_hid_write(cmd, cid, &resp, size + sizeof(uint8_t));
+    }
+    else {
+        ctap_hid_write(cmd, cid, &resp.status, sizeof(uint8_t));
+    }
 }
 
 static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce)
@@ -225,13 +243,13 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
     resp.version_minor = 0; //?
     resp.build_version = 0; //?
 
-    uint8_t command = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
+    uint8_t cmd = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
 
     // USB_HID_CTAP_CAPABILITY_NMSG because no CTAP1 / U2F for now
-    //USB_HID_CTAP_CAPABILITY_CBOR | USB_HID_CTAP_CAPABILITY_WINK | USB_HID_CTAP_CAPABILITY_NMSG;
-    resp.capabilities = CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
+    resp.capabilities = CTAP_HID_CAPABILITY_CBOR | CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
+    //resp.capabilities = CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
 
-    ctap_hid_write(command, cid_old, &resp, sizeof(ctap_hid_init_resp_t));
+    ctap_hid_write(cmd, cid_old, &resp, sizeof(ctap_hid_init_resp_t));
 }
 
 static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
