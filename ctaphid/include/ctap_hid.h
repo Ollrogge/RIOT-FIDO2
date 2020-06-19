@@ -12,6 +12,10 @@
 #define CTAP_HID_INIT_PACKET 0x80
 #define CTAP_HID_CONT_PACKET 0x00
 
+
+/* randomly chosen, todo */
+#define CTAP_HID_BUFFER_SIZE 4096
+
 #define CTAP_HID_COMMAND_PING (0x01 | CTAP_HID_INIT_PACKET)
 #define CTAP_HID_COMMAND_MSG (0x03 | CTAP_HID_INIT_PACKET)
 #define CTAP_HID_COMMAND_LOCK (0x04 | CTAP_HID_INIT_PACKET)
@@ -40,6 +44,7 @@
 
 #define CTAP_HID_CIDS_MAX 0x08
 
+void ctap_hid_init(void);
 void ctap_hid_handle_packet(uint8_t* pkt_raw);
 
 typedef struct
@@ -81,5 +86,22 @@ typedef struct
     uint8_t taken;
     uint32_t cid;
 } ctap_hid_cid_t;
+
+
+#define CTAP_HID_BUFFER_STATUS_BUFFERING 0x00
+#define CTAP_HID_BUFFER_STATUS_DONE 0x01
+#define CTAP_HID_BUFFER_STATUS_ERROR 0x02
+
+typedef struct
+{
+    uint32_t cid;
+    uint8_t buffer[CTAP_HID_BUFFER_SIZE];
+    uint8_t cmd;
+    uint16_t offset;
+    int16_t seq;
+    uint16_t bcnt;
+    uint8_t err;
+    uint8_t locked;
+} ctap_hid_buffer_t;
 
 #endif
