@@ -39,6 +39,9 @@ static char ctap_hid_stack[2048];
 void* ctap_hid_thread(void* arg)
 {
   (void) arg;
+  printf("Initializing ctaphid \n");
+  ctap_hid_init();
+
   uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
   for(;;) {
     memset(buffer, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);

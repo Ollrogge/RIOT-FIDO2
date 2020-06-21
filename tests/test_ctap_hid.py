@@ -1,5 +1,6 @@
 from fido2.hid import *
 import unittest
+import signal
 
 def get_device():
     devs = list(CtapHidDevice.list_devices())
@@ -17,6 +18,33 @@ def send_init_packet(dev, cid, cmd, payload_size=0, payload=b""):
     status ^= TYPE_INIT
     if status == CTAPHID.ERROR:
         raise CtapError(resp[0])
+
+def send_cont_packet(dev, cid, seq=0, payload=b""):
+    _dev = dev._dev
+    _dev.cid = cid
+    packet = hidtransport.UsbHidTransport.ContPacket(_dev.packet_size, _dev.cid, seq, payload)
+    _dev.InternalSendPacket(packet)
+    status, resp = _dev.InternalRecv()
+
+class test_timeout:
+  def __init__(self, seconds, error_message=None):
+    if error_message is None:
+      error_message = 'test timed out after {}s.'.format(seconds)
+    self.seconds = seconds
+    self.error_message = error_message
+
+  def handle_timeout(self, signum, frame):
+    raise TimeoutError(self.error_message)
+
+  def __enter__(self):
+    signal.signal(signal.SIGALRM, self.handle_timeout)
+    signal.alarm(self.seconds)
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    signal.alarm(0)
+
+class TimeoutError(Exception):
+    pass
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestPing(unittest.TestCase):
@@ -71,6 +99,26 @@ class TestErrors(unittest.TestCase):
             self.fail("cid = 0 cid should always cause an error")
         except CtapError as e:
             self.assertEqual(e.code, CtapError.ERR.INVALID_CHANNEL)
+
+        dev.close()
+
+    def test_cont_pkt_before_init(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        cid = hidtransport.UsbHidTransport.U2FHID_BROADCAST_CID
+
+        with test_timeout(1):
+            try:
+                send_cont_packet(dev, cid)
+            except TimeoutError as e:
+                return
+        return
+
+        self.fail("cont pkt before init should be ignored and therefore cause a timeout error")
 
         dev.close()
 
