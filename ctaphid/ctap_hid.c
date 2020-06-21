@@ -155,29 +155,27 @@ void ctap_hid_handle_packet(uint8_t* pkt_raw)
     mutex_lock(&is_busy_mutex);
 
     if (is_busy) {
-        if (pkt->cid == 0x00) {
+        if (cid == 0x00) {
             /* cid = 0x00 always invalid */
-            send_error_response(pkt->cid, CTAP_HID_ERROR_INVALID_CHANNEL);
-            return;
+            send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
         }
         else if (ctap_hid_buffer.cid == cid) {
             /* only cont packets allowed once init packet has been received */
             if (is_init_pkt(pkt)) {
-                send_error_response(pkt->cid, CTAP_HID_ERROR_INVALID_SEQ);
-                return;
+                send_error_response(cid, CTAP_HID_ERROR_INVALID_SEQ);
             }
             /* packet for this cid is currently being worked */
-            if (ctap_hid_buffer.locked) {
-                send_error_response(pkt->cid, CTAP_HID_ERROR_CHANNEL_BUSY);
-                return;
+            else if (ctap_hid_buffer.locked) {
+                send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
             }
-            /* buffer cont packets */
-            status = buffer_pkt(pkt);
+            else {
+                /* buffer cont packets */
+                status = buffer_pkt(pkt);
+            }
         }
         /* transactions are atomic, deny all other cids if busy with one cid */
         else {
-            send_error_response(pkt->cid, CTAP_HID_ERROR_CHANNEL_BUSY);
-            return;
+            send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
         }
     }
     else {

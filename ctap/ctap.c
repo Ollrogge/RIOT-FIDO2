@@ -11,6 +11,7 @@
 #include "cbor.h"
 
 static uint8_t get_info(CborEncoder* encoder);
+static uint8_t make_credential(CborEncoder* encoder);
 
 size_t ctap_handle_request(uint8_t* req, ctap_resp_t* resp)
 {
@@ -30,6 +31,9 @@ size_t ctap_handle_request(uint8_t* req, ctap_resp_t* resp)
             DEBUG("CTAP GET INFO \n");
             resp->status = get_info(&encoder);
             return cbor_encoder_get_buffer_size(&encoder, buf);
+        case CTAP_MAKE_CREDENTIAL:
+            DEBUG("CTAP MAKE CREDENTIAL \n");
+            resp->status = make_credential(&encoder);
         default:
             break;
     }
@@ -37,10 +41,16 @@ size_t ctap_handle_request(uint8_t* req, ctap_resp_t* resp)
     return -1;
 }
 
+static uint8_t make_credential(CborEncoder* encoder)
+{
+    ctap_make_credential_req_t req;
+    (void)req;
+    (void)encoder;
 
+    return 0;
+}
 
 /* CTAP specification (version 20190130) section 5.4 */
-
 // TODO: THESE SETTINGS MIGHT DIFFER FOR EACH IOT DEVICE. WHAT TO DO ABOUT THIS ?
 static uint8_t get_info(CborEncoder* encoder)
 {

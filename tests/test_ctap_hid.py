@@ -47,6 +47,7 @@ class TimeoutError(Exception):
     pass
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
+#@unittest.skip
 class TestPing(unittest.TestCase):
     def test_ping(self):
         try:
@@ -68,6 +69,7 @@ class TestPing(unittest.TestCase):
         dev.close()
 
 class TestErrors(unittest.TestCase):
+    #@unittest.skip
     def test_wrong_cid_for_command(self):
         try:
             dev = get_device()
@@ -102,6 +104,7 @@ class TestErrors(unittest.TestCase):
 
         dev.close()
 
+    #@unittest.skip
     def test_cont_pkt_before_init(self):
         try:
             dev = get_device()
@@ -119,6 +122,47 @@ class TestErrors(unittest.TestCase):
         return
 
         self.fail("cont pkt before init should be ignored and therefore cause a timeout error")
+
+        dev.close()
+
+    '''
+    send WINK command which will block for a little due to wink animation
+    immediately send another wink to trigger channel busy error
+    '''
+    def test_busy(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        _dev = dev._dev
+        cmd = (TYPE_INIT | CTAPHID.WINK)
+        cid_temp = None
+
+        payload = b""
+
+        packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
+                                                        len(payload), payload)
+
+        _dev.InternalSendPacket(packet)
+
+        cid_temp = _dev.cid
+        _dev.cid = hidtransport.UsbHidTransport.U2FHID_BROADCAST_CID
+        packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
+                                                        len(payload), payload)
+
+        _dev.InternalSendPacket(packet)
+
+        status, resp = _dev.InternalRecv()
+        status ^= TYPE_INIT
+
+        _dev.cid = cid_temp
+
+        self.assertEqual(status, CTAPHID.ERROR)
+        self.assertEqual(resp[0], CtapError.ERR.CHANNEL_BUSY)
+
+        status, resp = _dev.InternalRecv()
 
         dev.close()
 

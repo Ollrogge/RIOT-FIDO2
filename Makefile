@@ -27,6 +27,9 @@ USB_VID = 1915
 USB_PID = 521f
 PRODUCT_STRING = Nils usb
 
+USEPKG += tinycbor
+
+
 QUIET ?= 1
 
 include $(RIOTBASE)/Makefile.include

@@ -88,6 +88,11 @@
 #define CTAP2_ERR_VENDOR_FIRST              0xF0
 #define CTAP2_ERR_VENDOR_LAST               0xFF
 
+#define CTAP_RP_MAX_NAME_SIZE 32
+#define CTAP_USER_MAX_NAME_SIZE 32
+#define CTAP_USER_ID_MAX_SIZE 64
+#define CTAP_DOMAIN_NAME_MAX_SIZE 253
+
 /**
  * 128 bit identifier indenticating type of authenticator
  * Todo: how to set this based on being in a generic OS ?
@@ -98,9 +103,32 @@
 
 typedef struct
 {
+    uint8_t id[CTAP_USER_ID_MAX_SIZE]; /* RP-specific user account id */
+    uint8_t name[CTAP_USER_MAX_NAME_SIZE]; /* user name */
+    uint8_t icon_url[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing user icon image */
+} ctap_user_ent_t; /* user entity */
+
+typedef struct
+{
     uint8_t status;
     uint8_t data[CTAP_MAX_MSG_SIZE];
 } ctap_resp_t;
+
+typedef struct
+{
+    uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying party identifier (domain string) */
+    uint8_t name[CTAP_RP_MAX_NAME_SIZE];        /* human friendly RP name */
+    uint8_t icon_url[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing RP icon image */
+} ctap_rp_ent_t; /* relying party entity */
+
+typedef struct
+{
+    uint8_t client_data_hash[32]; /* SHA-256 hash */
+    ctap_rp_ent_t rp; /* Relying party */
+    ctap_user_ent_t user; /* user */
+
+
+} ctap_make_credential_req_t;
 
 size_t ctap_handle_request(uint8_t* req, ctap_resp_t* resp);
 
