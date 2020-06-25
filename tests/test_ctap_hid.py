@@ -10,8 +10,10 @@ def get_device():
 def send_init_packet(dev, cid, cmd, payload_size=0, payload=b""):
     _dev = dev._dev
     _dev.cid = cid
+    max_payload = _dev.packet_size - 7
+    frame = payload[:max_payload]
     packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
-             payload_size, payload)
+             payload_size, frame)
 
     _dev.InternalSendPacket(packet)
     status, resp = _dev.InternalRecv()
@@ -56,15 +58,20 @@ class TestPing(unittest.TestCase):
             self.fail("Unable to find hid device")
             return
 
+        _dev = dev._dev
+        max_payload = _dev.packet_size - 7
+
         msg1 = b"Hello world!"
         msg2 = b"Test     iing this   !"
         msg3 = b"               "
         msg4 = b""
+        msg5 = b"A"*427
 
         self.assertEqual(dev.ping(msg1).rstrip(b'\x00'), msg1)
         self.assertEqual(dev.ping(msg2).rstrip(b'\x00'), msg2)
         self.assertEqual(dev.ping(msg3).rstrip(b'\x00'), msg3)
         self.assertEqual(dev.ping(msg4).rstrip(b'\x00'), msg4)
+        self.assertEqual(dev.ping(msg5).rstrip(b'\x00'), msg5)
 
         dev.close()
 
@@ -119,16 +126,47 @@ class TestErrors(unittest.TestCase):
                 send_cont_packet(dev, cid)
             except TimeoutError as e:
                 return
-        return
 
         self.fail("cont pkt before init should be ignored and therefore cause a timeout error")
 
         dev.close()
 
+    #@unittest.skip
+    def test_cont_pkt_timeout(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        payload = b"A"*128
+        _dev = dev._dev
+        cid = _dev.cid
+        max_payload = _dev.packet_size - 7
+        frame = payload[:max_payload]
+
+        cmd = (TYPE_INIT | CTAPHID.PING)
+
+        packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
+                                                        len(payload), frame)
+
+        _dev.InternalSendPacket(packet)
+
+        with test_timeout(2):
+            try:
+                status, resp = _dev.InternalRecv()
+                status ^= TYPE_INIT
+                self.assertEqual(status, CTAPHID.ERROR)
+                self.assertEqual(resp[0], CtapError.ERR.TIMEOUT)
+            except TimeoutError as e:
+                self.fail("device should send timeout error after roughly 1 second")
+
+
     '''
     send WINK command which will block for a little due to wink animation
     immediately send another wink to trigger channel busy error
     '''
+    #@unittest.skip
     def test_busy(self):
         try:
             dev = get_device()

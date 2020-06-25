@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "usb/usbus/hid.h"
+#include "timex.h"
 
 #define CTAP_HID_INIT_PAYLOAD_SIZE  (CONFIG_USBUS_HID_INTERRUPT_EP_SIZE-7)   /* endpoint size - init packet metadata */
 #define CTAP_HID_CONT_PAYLOAD_SIZE  (CONFIG_USBUS_HID_INTERRUPT_EP_SIZE-5)   /* endpoint size - cont packet metadata */
@@ -11,6 +12,10 @@
 
 #define CTAP_HID_INIT_PACKET 0x80
 #define CTAP_HID_CONT_PACKET 0x00
+
+/* todo: both timeouts are arbitrary */
+#define CTAP_HID_TRANSACTION_TIMEOUT (1 * US_PER_SEC) /* cont packet not sent in time */
+#define CTAP_HID_INACTIVITY_TIMEOUT (1 * US_PER_SEC)
 
 
 /* randomly chosen, todo */
@@ -44,8 +49,8 @@
 
 #define CTAP_HID_CIDS_MAX 0x08
 
-void ctap_hid_init(void);
-void ctap_hid_handle_packet(uint8_t* pkt_raw);
+void ctap_hid_create(void);
+void ctap_hid_handle_packet(uint8_t *pkt_raw);
 
 typedef struct
 {
@@ -85,6 +90,7 @@ typedef struct
 {
     uint8_t taken;
     uint32_t cid;
+    uint64_t last_used;
 } ctap_hid_cid_t;
 
 
