@@ -179,7 +179,14 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
     if (is_init_pkt(pkt)) {
         ctap_buffer.bcnt = get_packet_len(pkt);
 
+        /* check for init transaction size described in CTAP specification (version 20190130) section 8.1.9.1.3 */
         if (pkt->init.cmd == CTAP_HID_COMMAND_INIT && ctap_buffer.bcnt != 8) {
+            ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
+            return CTAP_HID_BUFFER_STATUS_ERROR;
+        }
+
+        /* don't allow transactions bigger than max buffer size */
+        if (ctap_buffer.bcnt > CTAP_HID_BUFFER_SIZE) {
             ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
@@ -197,8 +204,15 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
         int diff = left - CTAP_HID_CONT_PAYLOAD_SIZE;
         ctap_buffer.seq += 1;
 
+        /* seqs have to increase sequentially */
         if (pkt->cont.seq != ctap_buffer.seq) {
             ctap_buffer.err = CTAP_HID_ERROR_INVALID_SEQ;
+            return CTAP_HID_BUFFER_STATUS_ERROR;
+        }
+
+        /* check for potential buffer overflow */
+        if (ctap_buffer.offset + CTAP_HID_CONT_PAYLOAD_SIZE >= CTAP_HID_BUFFER_SIZE) {
+            ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
 
@@ -229,11 +243,11 @@ void ctap_hid_create(void)
     mutex_init(&is_busy_mutex);
 
     printf("Creating ctap_hid main thread \n");
-    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN -1, 0, pkt_loop,
+    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN -2, 0, pkt_loop,
                                 NULL, "ctap_hid_main");
 
     printf("Creating ctap_hid worker thread \n");
-    worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -2,
+    worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -1,
                                THREAD_CREATE_SLEEPING, pkt_worker, NULL, "ctap_hid_pkt_worker");
 
 }
@@ -255,8 +269,16 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     }
     else if(is_busy) {
         if (ctap_buffer.cid == cid) {
-            /* only cont packets allowed once init packet has been received */
+            /*
+             If the device detects an INIT command during a transaction that has the same channel id
+             as the active transaction, the transaction is aborted (if possible)
+             and all buffered data flushed (if any)
+             */
             if (is_init_pkt(pkt)) {
+                /* todo: reset when ctap_buffer is locked ? */
+                if (!ctap_buffer.locked) {
+                    reset_ctap_buffer();
+                }
                 send_error_response(cid, CTAP_HID_ERROR_INVALID_SEQ);
             }
             /* packet for this cid is currently being worked */
@@ -274,7 +296,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
         }
     }
     else {
-        /* first init packet received starts a transaction */
+        /* first init packet received, starts a transaction */
         if (is_init_pkt(pkt)) {
             is_busy = 1;
             status = buffer_pkt(pkt);
@@ -283,7 +305,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     }
 
     if (status == CTAP_HID_BUFFER_STATUS_ERROR) {
-        memset(&ctap_buffer, 0, sizeof(ctap_buffer));
+        reset_ctap_buffer();
         send_error_response(cid, ctap_buffer.err);
     }
     /* pkt->init.bcnt bytes have been received. Wakeup worker */
@@ -468,7 +490,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     }
 
     memset(&resp, 0, sizeof(ctap_resp_t));
-    size = ctap_handle_request(payload, &resp);
+    size = ctap_handle_request(payload, bcnt, &resp);
 
     if (resp.status == CTAP2_OK) {
         ctap_hid_write(cmd, cid, &resp, size + sizeof(uint8_t));
@@ -509,7 +531,6 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
 
 static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 {
-    DEBUG("CTAP_HID WRITE: %u %u \n", size, ctap_buffer.offset);
     uint8_t * data = (uint8_t *)_data;
     uint8_t buf[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
     int offset = 0;

@@ -88,24 +88,40 @@
 #define CTAP2_ERR_VENDOR_FIRST              0xF0
 #define CTAP2_ERR_VENDOR_LAST               0xFF
 
+
+/* todo: think about these sizes */
 #define CTAP_RP_MAX_NAME_SIZE 32
 #define CTAP_USER_MAX_NAME_SIZE 32
 #define CTAP_USER_ID_MAX_SIZE 64
 #define CTAP_DOMAIN_NAME_MAX_SIZE 253
 
+/* ctap make credential cbor map key values */
+#define CTAP_MC_REQ_CLIENT_DATA_HASH    0x01
+#define CTAP_MC_REQ_RP                  0x02
+#define CTAP_MC_REQ_USER                0x03
+#define CTAP_MC_REQ_PUB_KEY_CRED_PARAMS 0x04
+#define CTAP_MC_REQ_EXCLUDE_LIST        0x05
+#define CTAP_MC_REQ_EXTENSIONS          0x06
+#define CTAP_MC_REQ_OPTIONS             0x07
+#define CTAP_MC_REQ_PIN_AUTH            0x08
+#define CTAP_MC_REQ_PIN_PROTOCOL        0x09
+
 /**
- * 128 bit identifier indenticating type of authenticator
+ * 128 bit identifier indentifying type of authenticator
  * Todo: how to set this based on being in a generic OS ?
  */
 #define DEVICE_AAGUID 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 
 
+#define CTAP_CLIENT_DATA_HASH_SIZE 32 /* sha256 */
+
 typedef struct
 {
-    uint8_t id[CTAP_USER_ID_MAX_SIZE]; /* RP-specific user account id */
-    uint8_t name[CTAP_USER_MAX_NAME_SIZE]; /* user name */
-    uint8_t icon_url[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing user icon image */
+    uint8_t id[CTAP_USER_ID_MAX_SIZE + 1]; /* RP-specific user account id */
+    uint8_t name[CTAP_USER_MAX_NAME_SIZE + 1]; /* user name */
+    uint8_t display_name[CTAP_USER_MAX_NAME_SIZE + 1]; /* user display name */
+    uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing user icon image */
 } ctap_user_ent_t; /* user entity */
 
 typedef struct
@@ -117,19 +133,19 @@ typedef struct
 typedef struct
 {
     uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying party identifier (domain string) */
-    uint8_t name[CTAP_RP_MAX_NAME_SIZE];        /* human friendly RP name */
-    uint8_t icon_url[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing RP icon image */
+    uint8_t name[CTAP_RP_MAX_NAME_SIZE + 1];        /* human friendly RP name */
+    uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing RP icon image */
 } ctap_rp_ent_t; /* relying party entity */
 
 typedef struct
 {
-    uint8_t client_data_hash[32]; /* SHA-256 hash */
+    uint8_t client_data_hash[CTAP_CLIENT_DATA_HASH_SIZE]; /* SHA-256 hash */
     ctap_rp_ent_t rp; /* Relying party */
     ctap_user_ent_t user; /* user */
 
 
 } ctap_make_credential_req_t;
 
-size_t ctap_handle_request(uint8_t* req, ctap_resp_t* resp);
+size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
 
 #endif

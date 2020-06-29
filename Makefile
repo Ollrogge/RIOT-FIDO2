@@ -15,6 +15,7 @@ USEMODULE += usbus_hid
 USEMODULE += stdio_hid
 USEMODULE += xtimer
 USEMODULE += isrpipe
+USEMODULE += isrpipe_read_timeout
 USEMODULE += ctap
 USEMODULE += ctaphid
 

@@ -18,8 +18,8 @@
 #define CTAP_HID_INACTIVITY_TIMEOUT (1 * US_PER_SEC)
 
 
-/* randomly chosen, todo */
-#define CTAP_HID_BUFFER_SIZE 4096
+/* CTAP specification (version 20190130) section 8.1.4. */
+#define CTAP_HID_BUFFER_SIZE 7609 /* 64 - 7 + 128 * (64 - 5) */
 
 #define CTAP_HID_COMMAND_PING (0x01 | CTAP_HID_INIT_PACKET)
 #define CTAP_HID_COMMAND_MSG (0x03 | CTAP_HID_INIT_PACKET)
