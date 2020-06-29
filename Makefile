@@ -3,7 +3,7 @@ APPLICATION=FIDO2
 
 BOARD ?= nrf52840dk
 
-RIOTBASE ?= $(CURDIR)/../RIOT-fork
+RIOTBASE ?= RIOT
 
 EXTERNAL_MODULE_DIRS += ./ctap
 EXTERNAL_MODULE_DIRS += ./ctaphid
@@ -19,8 +19,8 @@ USEMODULE += isrpipe_read_timeout
 USEMODULE += ctap
 USEMODULE += ctaphid
 
-INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/ctap/include
-INCLUDES += -I/home1/hops/Uni/BachelorArbeit/RIOT-FIDO2/ctaphid/include
+INCLUDES += -I./ctap/include
+INCLUDES += -I./ctaphid/include
 
 DISABLE_MODULE += auto_init_usbus
 
@@ -29,7 +29,6 @@ USB_PID = 521f
 PRODUCT_STRING = Nils usb
 
 USEPKG += tinycbor
-
 
 QUIET ?= 1
 
