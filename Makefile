@@ -10,14 +10,9 @@ EXTERNAL_MODULE_DIRS += ./ctaphid
 
 DEVELHELP ?= 1
 
-USEMODULE += usbus
 USEMODULE += usbus_hid
-USEMODULE += stdio_hid
-USEMODULE += xtimer
-USEMODULE += isrpipe
-USEMODULE += isrpipe_read_timeout
-USEMODULE += ctap
 USEMODULE += ctaphid
+USEMODULE += ctap
 
 INCLUDES += -I$(CURDIR)/ctap/include
 INCLUDES += -I$(CURDIR)/ctaphid/include
