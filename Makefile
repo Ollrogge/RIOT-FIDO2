@@ -19,8 +19,8 @@ USEMODULE += isrpipe_read_timeout
 USEMODULE += ctap
 USEMODULE += ctaphid
 
-INCLUDES += -I./ctap/include
-INCLUDES += -I./ctaphid/include
+INCLUDES += -I$(CURDIR)/ctap/include
+INCLUDES += -I$(CURDIR)/ctaphid/include
 
 DISABLE_MODULE += auto_init_usbus
 
