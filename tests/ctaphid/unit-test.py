@@ -66,12 +66,15 @@ class TestPing(unittest.TestCase):
         msg3 = b"               "
         msg4 = b""
         msg5 = b"A"*427
+        #max possible size
+        msg6 = b"A"*7609
 
         self.assertEqual(dev.ping(msg1).rstrip(b'\x00'), msg1)
         self.assertEqual(dev.ping(msg2).rstrip(b'\x00'), msg2)
         self.assertEqual(dev.ping(msg3).rstrip(b'\x00'), msg3)
         self.assertEqual(dev.ping(msg4).rstrip(b'\x00'), msg4)
         self.assertEqual(dev.ping(msg5).rstrip(b'\x00'), msg5)
+        self.assertEqual(dev.ping(msg6).rstrip(b'\x00'), msg6)
 
         dev.close()
 
@@ -161,6 +164,29 @@ class TestErrors(unittest.TestCase):
             except TimeoutError as e:
                 self.fail("device should send timeout error after roughly 1 second")
 
+    #@unittest.skip
+    def test_pkt_too_big(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        # max buffer size + 1
+        payload = b"A"*7610
+        _dev = dev._dev
+        max_payload = _dev.packet_size - 7
+        frame = payload[:max_payload]
+        cmd = (TYPE_INIT | CTAPHID.PING)
+
+        packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
+                                                        len(payload), frame)
+
+        _dev.InternalSendPacket(packet)
+        status, resp = _dev.InternalRecv()
+        status ^= TYPE_INIT
+        self.assertEqual(status, CTAPHID.ERROR)
+        self.assertEqual(resp[0], CtapError.ERR.INVALID_LENGTH)
 
     '''
     send WINK command which will block for a little due to wink animation

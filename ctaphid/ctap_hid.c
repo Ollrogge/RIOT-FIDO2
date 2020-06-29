@@ -53,6 +53,8 @@ static void* pkt_loop(void* arg);
 static usbus_t usbus;
 static char usb_stack[USBUS_STACKSIZE];
 
+static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
+
 void usb_hid_stdio_init(usbus_t* usbus, uint8_t* report_desc, size_t report_desc_size);
 ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 
@@ -211,7 +213,7 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
         }
 
         /* check for potential buffer overflow */
-        if (ctap_buffer.offset + CTAP_HID_CONT_PAYLOAD_SIZE >= CTAP_HID_BUFFER_SIZE) {
+        if (ctap_buffer.offset + CTAP_HID_CONT_PAYLOAD_SIZE > CTAP_HID_BUFFER_SIZE) {
             ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
@@ -237,16 +239,16 @@ void ctap_hid_create(void)
     usbus_init(&usbus, usbdev);
     usb_hid_stdio_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
 
-    printf("Starting usbus thread \n");
+    DEBUG("Starting usbus thread \n");
     usbus_create(usb_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
 
     mutex_init(&is_busy_mutex);
 
-    printf("Creating ctap_hid main thread \n");
+    DEBUG("Creating ctap_hid main thread \n");
     thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN -2, 0, pkt_loop,
                                 NULL, "ctap_hid_main");
 
-    printf("Creating ctap_hid worker thread \n");
+    DEBUG("Creating ctap_hid worker thread \n");
     worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -1,
                                THREAD_CREATE_SLEEPING, pkt_worker, NULL, "ctap_hid_pkt_worker");
 
@@ -259,7 +261,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     uint32_t cid = pkt->cid;
     uint8_t status = CTAP_HID_BUFFER_STATUS_BUFFERING;
 
-    DEBUG("ctap_hid_handle_packet: 0x%08lx \n", cid);
+    //DEBUG("ctap_hid_handle_packet: 0x%08lx \n", cid);
 
     mutex_lock(&is_busy_mutex);
 
@@ -277,7 +279,9 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
             if (is_init_pkt(pkt)) {
                 /* todo: reset when ctap_buffer is locked ? */
                 if (!ctap_buffer.locked) {
+                    delete_cid(cid);
                     reset_ctap_buffer();
+                    is_busy = 0;
                 }
                 send_error_response(cid, CTAP_HID_ERROR_INVALID_SEQ);
             }
@@ -305,21 +309,19 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     }
 
     if (status == CTAP_HID_BUFFER_STATUS_ERROR) {
-        reset_ctap_buffer();
         send_error_response(cid, ctap_buffer.err);
+        delete_cid(cid);
+        reset_ctap_buffer();
+        is_busy = 0;
     }
     /* pkt->init.bcnt bytes have been received. Wakeup worker */
     else if (status == CTAP_HID_BUFFER_STATUS_DONE) {
         /*todo: mutex needed here too? */
         ctap_buffer.locked = 1;
-        mutex_unlock(&is_busy_mutex);
         thread_wakeup(worker_pid);
     }
     else {
-        /**
-         * refresh timestamp of cid that is being buffered
-         *
-         */
+        /* refresh timestamp of cid that is being buffered */
         refresh_cid(ctap_buffer.cid);
     }
 
