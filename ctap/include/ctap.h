@@ -116,6 +116,9 @@
 
 #define CTAP_CLIENT_DATA_HASH_SIZE 32 /* sha256 */
 
+#define CTAP_PUB_KEY_CRED_PUB_KEY 0x01
+#define CTAP_PUB_KEY_CRED_UNKNOWN 0x02
+
 typedef struct
 {
     uint8_t id[CTAP_USER_ID_MAX_SIZE + 1]; /* RP-specific user account id */
@@ -130,6 +133,18 @@ typedef struct
     uint8_t data[CTAP_MAX_MSG_SIZE];
 } ctap_resp_t;
 
+/* webauthn specification (version 20190304) section 5.10.3 */
+typedef struct
+{
+    uint8_t cred_type;
+} ctap_credential_desc_t;
+
+typedef struct
+{
+    uint8_t cred_type;
+    uint32_t alg_type;
+} ctap_pub_key_cred_params_t;
+
 typedef struct
 {
     uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying party identifier (domain string) */
@@ -139,9 +154,11 @@ typedef struct
 
 typedef struct
 {
-    uint8_t client_data_hash[CTAP_CLIENT_DATA_HASH_SIZE]; /* SHA-256 hash */
+    /* webauthn specification (version 20190304) section 5.10.1 */
+    uint8_t client_data_hash[CTAP_CLIENT_DATA_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
     ctap_rp_ent_t rp; /* Relying party */
     ctap_user_ent_t user; /* user */
+    ctap_pub_key_cred_params_t cred_params;
 
 
 } ctap_make_credential_req_t;
