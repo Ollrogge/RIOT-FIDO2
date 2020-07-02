@@ -1,6 +1,9 @@
 from fido2.hid import CtapHidDevice, CAPABILITY
 from fido2.ctap2 import CTAP2
+from fido2.client import Fido2Client
+from fido2.server import Fido2Server
 from binascii import a2b_hex
+from hashlib import sha256
 
 import unittest
 
@@ -13,8 +16,14 @@ def get_device():
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestInfo(unittest.TestCase):
+    @unittest.skip
     def test_info(self):
-        global dev
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
         if dev.capabilities & CAPABILITY.CBOR:
             ctap2 = CTAP2(dev)
             info = ctap2.get_info()
@@ -32,10 +41,27 @@ class TestInfo(unittest.TestCase):
 
         dev.close()
 
-if __name__ == '__main__':
-    try:
-        dev = get_device()
-    except Exception:
-        print("Unable to find hid device")
+    #@unittest.skip
+    def test_make_credential(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
 
+        #random hash for now
+        m = sha256()
+        m.update(b"random stuff")
+        client_data_hash = m.digest()
+        rp = {"id": "example.com", "name": "Example RP"}
+        user = {"id": b"user_id", "name": "A. User"}
+        key_params = [{"type": "public-key", "alg": -7}]
+
+        ctap2 = CTAP2(dev)
+
+        resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
+
+        dev.close()
+
+if __name__ == '__main__':
     unittest.main()

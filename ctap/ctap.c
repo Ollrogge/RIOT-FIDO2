@@ -20,6 +20,9 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
     memset(&encoder, 0, sizeof(CborEncoder));
 
     uint8_t cmd = *req;
+    req++;
+    size--;
+
     uint8_t* buf = resp->data;
 
     cbor_encoder_init(&encoder, buf, size, 0);
@@ -51,7 +54,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
     ret = cbor_helper_parse_make_credential_req(&req, size, req_raw);
 
-    DEBUG("ret val: %d \n ", ret);
+    DEBUG("ret val: 0x%02x \n ", ret);
     (void)ret;
 
     return 0;

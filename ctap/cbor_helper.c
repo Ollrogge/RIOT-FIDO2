@@ -20,7 +20,7 @@ static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type)
 {
     (void)cred_type;
     (void)alg_type;
-    DEBUG("cred_params_supported cred_type: %u alg_type: %lu \n", cred_type, alg_type);
+    DEBUG("cred_params_supported cred_type: %u alg_type: %ld \n", cred_type, alg_type);
     return 1;
 }
 
@@ -131,6 +131,16 @@ uint8_t cbor_helper_get_info(CborEncoder* encoder)
     return CTAP2_OK;
 }
 
+/* http://cbor.me/ */
+static void print_cbor_hex(uint8_t* req, size_t size)
+{
+    for (size_t i = 0; i < size; i++) {
+        DEBUG("%02x", req[i]);
+    }
+
+    DEBUG("\n");
+}
+
 uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size, uint8_t* req_raw)
 {
     int ret;
@@ -141,15 +151,13 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
     size_t map_len;
     CborType type;
 
-    DEBUG("cbor_helper_parse_make_credential_req size: %u \n", size);
+    print_cbor_hex(req_raw, size);
 
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     type = cbor_value_get_type(&it);
     if (type != CborMapType) return CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
-
-    DEBUG("test1 \n");
 
     ret = cbor_value_enter_container(&it, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -204,6 +212,13 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
             default:
                 break;
         }
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     }
 
     return CTAP2_OK;
@@ -217,7 +232,9 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
     CborValue map;
     size_t map_len;
     char key[8];
-    size_t key_len = sizeof(key);
+    size_t key_len;
+
+    uint8_t id_parsed = 0;
 
     type = cbor_value_get_type(it);
     if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
@@ -225,14 +242,14 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
     ret = cbor_value_enter_container(it, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    ret = cbor_value_get_map_length(&map, &map_len);
+    ret = cbor_value_get_map_length(it, &map_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     for (size_t i = 0; i < map_len; i++) {
-
         type = cbor_value_get_type(&map);
         if (type != CborTextStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
 
+        key_len = sizeof(key);
         ret = cbor_value_copy_text_string(&map, key, &key_len, NULL);
         if (ret == CborErrorOutOfMemory) return CTAP2_ERR_LIMIT_EXCEEDED;
 
@@ -250,6 +267,8 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
             if (ret != 0) {
                 return ret;
             }
+
+            id_parsed = 1;
         }
         else if (strcmp(key, "name") == 0) {
             ret = parse_text_string(&map, (char*)rp->name, CTAP_RP_MAX_NAME_SIZE);
@@ -271,6 +290,11 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     }
 
+    /* rp id is mandatory */
+    if (!id_parsed) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
     return CTAP2_OK;
 }
 
@@ -278,11 +302,13 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
 static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
 {
     char key[16];
-    size_t key_len = sizeof(key);
+    size_t key_len;
     int type;
     int ret;
     CborValue map;
     size_t map_len;
+
+    uint8_t id_parsed = 0;
 
     type = cbor_value_get_type(it);
     if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
@@ -290,13 +316,14 @@ static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
     ret = cbor_value_enter_container(it, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    ret = cbor_value_get_map_length(&map, &map_len);
+    ret = cbor_value_get_map_length(it, &map_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     for (size_t i = 0; i < map_len; i++) {
         type = cbor_value_get_type(&map);
         if (type != CborTextStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
 
+        key_len = sizeof(key);
         ret = cbor_value_copy_text_string(&map, key, &key_len, NULL);
         if (ret == CborErrorOutOfMemory) return CTAP2_ERR_LIMIT_EXCEEDED;
 
@@ -308,24 +335,29 @@ static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
         /* todo: make sure we have id key, because it is not optional */
         if (strcmp(key, "id") == 0) {
             ret = parse_byte_array(&map, user->id, CTAP_USER_ID_MAX_SIZE);
-            if (ret != 0) {
+            if (ret != CTAP2_OK) {
                 return ret;
             }
+
+            id_parsed = 1;
         }
         else if (strcmp(key, "name") == 0) {
-            ret = parse_text_string(it, (char*)user->name, CTAP_USER_MAX_NAME_SIZE);
-            if (ret != 0) {
+            ret = parse_text_string(&map, (char*)user->name, CTAP_USER_MAX_NAME_SIZE);
+            if (ret != CTAP2_OK) {
                 return ret;
             }
         }
         else if (strcmp(key, "displayName") == 0) {
-            ret = parse_text_string(it, (char*)user->display_name, CTAP_USER_MAX_NAME_SIZE);
-            if (ret != 0) {
+            ret = parse_text_string(&map, (char*)user->display_name, CTAP_USER_MAX_NAME_SIZE);
+            if (ret != CTAP2_OK) {
                 return ret;
             }
         }
         else if (strcmp(key, "icon") == 0) {
-            ret = parse_text_string(it, (char*)user->icon, CTAP_DOMAIN_NAME_MAX_SIZE);
+            ret = parse_text_string(&map, (char*)user->icon, CTAP_DOMAIN_NAME_MAX_SIZE);
+            if (ret != CTAP2_OK) {
+                return ret;
+            }
         }
         else {
             DEBUG("CTAP_parse_rp: ignoring unknown key: %s \n", key);
@@ -333,6 +365,11 @@ static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
 
         ret = cbor_value_advance(&map);
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    /* user id is mandatory */
+    if (!id_parsed) {
+        return CTAP2_ERR_MISSING_PARAMETER;
     }
 
     return CTAP2_OK;
@@ -401,7 +438,7 @@ static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     type = cbor_value_get_type(&alg);
-    if (type != CborTextStringType) return CTAP2_ERR_MISSING_PARAMETER;
+    if (type != CborIntegerType) return CTAP2_ERR_MISSING_PARAMETER;
 
     ret = cbor_value_copy_text_string(&cred, type_str, &type_str_len, NULL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -431,19 +468,20 @@ static uint8_t parse_fixed_size_byte_array(CborValue *it, uint8_t* dst, size_t l
 {
     int ret;
     int type;
-    size_t len_copied;
+    size_t len2;
 
     type = cbor_value_get_type(it);
     if (type != CborByteStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
 
-    ret = cbor_value_copy_byte_string(it, dst, &len_copied, NULL);
+    len2 = len;
+    ret = cbor_value_copy_byte_string(it, dst, &len2, NULL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    if (len_copied != len) {
+    if (len2 != len) {
         return CTAP1_ERR_INVALID_LENGTH;
     }
 
-    return 0;
+    return CTAP2_OK;
 }
 
 static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t len)
@@ -457,7 +495,7 @@ static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t len)
     ret = cbor_value_copy_byte_string(it, dst, &len, NULL);
     if (ret == CborErrorOutOfMemory) return CTAP2_ERR_LIMIT_EXCEEDED;
 
-    return 0;
+    return CTAP2_OK;
 }
 
 static uint8_t parse_text_string(CborValue *it, char* dst, size_t len)
@@ -473,5 +511,5 @@ static uint8_t parse_text_string(CborValue *it, char* dst, size_t len)
 
     dst[len] = 0;
 
-    return 0;
+    return CTAP2_OK;
 }
