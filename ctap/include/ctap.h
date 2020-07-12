@@ -25,6 +25,15 @@
 #define CTAP_GET_INFO_RESP_MAX_MSG_SIZE     0x05 /* Maximum message size supported by the authenticator */
 #define CTAP_GET_INFO_RESP_PIN_PROTOCOLS    0x06 /* List of supported PIN Protocol versions */
 
+#define CTAP_MAKE_CREDENTIAL_RESP_FMT       0x01
+#define CTAP_MAKE_CREDENTIAL_RESP_AUTH_DATA 0x02
+#define CTAP_MAKE_CREDENTIAL_RESP_ATT_STMT  0x03
+
+#define CTAP_AUTH_DATA_FLAG_UP     (1 << 0) /* user present */
+#define CTAP_AUTH_DATA_FLAG_UV     (1 << 2) /* user verified */
+#define CTAP_AUTH_DATA_FLAG_AT     (1 << 6) /* attested credential data included */
+#define CTAP_AUTH_DATA_FLAG_ED     (1 << 7) /* extension data included */
+
 /* All options are in the form key-value pairs with string IDs and boolean values */
 
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_PLAT       "plat"         /* platform device */
@@ -119,19 +128,54 @@
 #define CTAP_PUB_KEY_CRED_PUB_KEY 0x01
 #define CTAP_PUB_KEY_CRED_UNKNOWN 0x02
 
+#define CTAP_COSE_KEY_LABEL_KTY      1
+#define CTAP_COSE_KEY_LABEL_ALG      3
+#define CTAP_COSE_KEY_LABEL_CRV      -1
+#define CTAP_COSE_KEY_LABEL_X        -2
+#define CTAP_COSE_KEY_LABEL_Y        -3
+#define CTAP_COSE_KEY_KTY_EC2        2
+#define CTAP_COSE_KEY_CRV_P256       1
+
+
+#define CTAP_COSE_ALG_ES256            -7
+
+#define CTAP_SHA256_HASH_SIZE 32
+
+/* https://stackoverflow.com/questions/17269238/ecdsa-signature-length */
+#define CTAP_ES256_DER_MAX_SIZE 72
+
+
+/**
+ * @brief Ctap resp struct forward declaration
+ */
+typedef struct ctap_resp ctap_resp_t;
+
+
+size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
+void ctap_init(void);
+uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t size, uint8_t *client_data_hash,
+                            uint8_t *sig, size_t *sig_len);
+
+typedef struct __attribute__((packed))
+{
+    uint8_t cred_type;
+    int32_t alg_type;
+} ctap_pub_key_cred_params_t;
+
+
 typedef struct
 {
-    uint8_t id[CTAP_USER_ID_MAX_SIZE + 1]; /* RP-specific user account id */
+    uint8_t id[CTAP_USER_ID_MAX_SIZE]; /* RP-specific user account id, byte string */
     uint8_t name[CTAP_USER_MAX_NAME_SIZE + 1]; /* user name */
     uint8_t display_name[CTAP_USER_MAX_NAME_SIZE + 1]; /* user display name */
     uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing user icon image */
 } ctap_user_ent_t; /* user entity */
 
-typedef struct
+struct ctap_resp
 {
     uint8_t status;
     uint8_t data[CTAP_MAX_MSG_SIZE];
-} ctap_resp_t;
+};
 
 /* webauthn specification (version 20190304) section 5.10.3 */
 typedef struct
@@ -141,13 +185,8 @@ typedef struct
 
 typedef struct
 {
-    uint8_t cred_type;
-    uint32_t alg_type;
-} ctap_pub_key_cred_params_t;
-
-typedef struct
-{
     uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying party identifier (domain string) */
+    size_t id_len;
     uint8_t name[CTAP_RP_MAX_NAME_SIZE + 1];        /* human friendly RP name */
     uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* URL referencing RP icon image */
 } ctap_rp_ent_t; /* relying party entity */
@@ -159,10 +198,72 @@ typedef struct
     ctap_rp_ent_t rp; /* Relying party */
     ctap_user_ent_t user; /* user */
     ctap_pub_key_cred_params_t cred_params;
-
-
 } ctap_make_credential_req_t;
 
-size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
+#define CTAP_CREDENTIAL_ID_SIZE 16
+
+/* webauthn specification (version 20190304) section 4 */
+typedef struct
+{
+    uint8_t id[CTAP_CREDENTIAL_ID_SIZE]; /* At least 16 bytes that include at least 100 bits of entropy */
+} cred_id_t;
+
+typedef struct
+{
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE]; /* At least 16 bytes that include at least 100 bits of entropy */
+    uint8_t user_id[CTAP_USER_ID_MAX_SIZE ]; /* RP-specific user account id */
+    uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* Relying party identifier (domain string) */
+} ctap_resident_key_t;
+
+
+/*
+At registration time, the authenticator creates an asymmetric key pair,
+and stores its private key portion and information from the Relying Party
+into a public key credential source.
+*/
+/* webauthn specification (version 20190304) section 4 */
+typedef struct
+{
+    uint8_t cred_type; /* PublicKeyCredentialType */
+    cred_id_t id; /* credential id */
+    uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* Relying Party Identifier */
+    ctap_user_ent_t user_handle;
+} cred_source_t;
+
+typedef struct
+{
+    uint8_t x[32];
+    uint8_t y[32];
+    ctap_pub_key_cred_params_t params;
+} ctap_public_key_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t aaguid[16];
+    uint8_t cred_len_h;
+    uint8_t cred_len_l;
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
+} ctap_attested_cred_data_header_t;
+
+typedef struct
+{
+    ctap_attested_cred_data_header_t header;
+    ctap_public_key_t pub_key;
+} ctap_attested_cred_data_t;
+
+/* part of attestation object  https://www.w3.org/TR/webauthn/#attestation-object */
+typedef struct __attribute__((packed))
+{
+    uint8_t rp_id_hash[32];
+    uint8_t flags;
+    uint32_t counter;
+} ctap_auth_data_header_t;
+
+typedef struct
+{
+    ctap_auth_data_header_t header;
+    ctap_attested_cred_data_t attested_cred_data;
+} ctap_auth_data_t;
 
 #endif
+

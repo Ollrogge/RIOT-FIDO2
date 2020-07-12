@@ -61,6 +61,8 @@ class TestInfo(unittest.TestCase):
 
         resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
 
+        print("RESP: ", resp)
+
         dev.close()
 
 if __name__ == '__main__':

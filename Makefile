@@ -13,6 +13,7 @@ DEVELHELP ?= 1
 USEMODULE += usbus_hid
 USEMODULE += ctaphid
 USEMODULE += ctap
+USEMODULE += hashes
 
 INCLUDES += -I$(CURDIR)/ctap/include
 INCLUDES += -I$(CURDIR)/ctaphid/include
@@ -24,10 +25,14 @@ USB_PID = 521f
 PRODUCT_STRING = Nils usb
 
 USEPKG += tinycbor
+USEPKG += relic
 
 QUIET ?= 1
 
 include $(RIOTBASE)/Makefile.include
+
+# The rest of the parameters are configuration parameters for RELIC described in its documentation.
+export RELIC_CONFIG_FLAGS=-DARCH=NONE -DOPSYS=NONE -DQUIET=off -DWORD=32 -DFP_PRIME=256 -DWITH="BN;MD;DV;FP;EP;CP;BC;EC" -DSEED=RIOTRND
 
 CFLAGS += -DCONFIG_USB_VID=0x$(USB_VID)
 CFLAGS += -DCONFIG_USB_PID=0x$(USB_PID)

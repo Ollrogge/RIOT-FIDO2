@@ -261,9 +261,9 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     uint32_t cid = pkt->cid;
     uint8_t status = CTAP_HID_BUFFER_STATUS_BUFFERING;
 
-    //DEBUG("ctap_hid_handle_packet: 0x%08lx \n", cid);
-
     mutex_lock(&is_busy_mutex);
+
+    DEBUG("ctap_hid_handle_packet: 0x%08lx %d \n", cid, is_busy);
 
     if (cid == 0x00) {
         /* cid = 0x00 always invalid */
@@ -351,12 +351,17 @@ static void* pkt_worker(void* arg)
 {
     (void) arg;
 
+     /* init crypto stuff */
+    ctap_init();
+
     while (1) {
 
         uint8_t* buf = (uint8_t*) &ctap_buffer.buffer;
         uint32_t cid = ctap_buffer.cid;
         uint16_t bcnt = ctap_buffer.bcnt;
         uint8_t cmd = ctap_buffer.cmd;
+
+        DEBUG("PKT WORKER \n");
 
         if (cmd == CTAP_HID_COMMAND_INIT) {
             DEBUG("CTAP_HID: INIT COMMAND \n");
@@ -493,6 +498,8 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
     memset(&resp, 0, sizeof(ctap_resp_t));
     size = ctap_handle_request(payload, bcnt, &resp);
+
+    DEBUG("CTAPHID CBOR BYTES TO SENT: %u \n", size);
 
     if (resp.status == CTAP2_OK) {
         ctap_hid_write(cmd, cid, &resp, size + sizeof(uint8_t));
