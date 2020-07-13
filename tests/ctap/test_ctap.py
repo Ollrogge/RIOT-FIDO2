@@ -1,5 +1,6 @@
 from fido2.hid import CtapHidDevice, CAPABILITY
-from fido2.ctap2 import CTAP2
+from fido2.ctap2 import CTAP2, AttestationObject, AttestedCredentialData
+from fido2.attestation import Attestation
 from fido2.client import Fido2Client
 from fido2.server import Fido2Server
 from binascii import a2b_hex
@@ -20,7 +21,7 @@ def get_device():
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestInfo(unittest.TestCase):
-    @unittest.skip
+    #@unittest.skip
     def test_info(self):
         try:
             dev = get_device()
@@ -65,13 +66,15 @@ class TestInfo(unittest.TestCase):
 
         resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
 
-        print("RESP: ", resp)
+        #print("RESP: ", resp)
 
         sig = resp.att_statement['sig']
 
-        r, s = DEREncoder.decode_signature(sig)
-
-        print(r, s)
+        Attestation.for_type(resp.fmt)().verify(
+            resp.att_statement,
+            resp.auth_data,
+            client_data_hash
+        )
 
         dev.close()
 

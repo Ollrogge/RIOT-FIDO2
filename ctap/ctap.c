@@ -20,7 +20,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 static uint8_t make_auth_data(ctap_rp_ent_t *rp,ctap_pub_key_cred_params_t *cred_params, ctap_auth_data_t* auth_data);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static void get_random_sequence(uint8_t *dst, size_t len);
-static void sig_to_des_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
+static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
 
 /* for testing */
 static bn_t g_priv_key;
@@ -59,7 +59,6 @@ static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter)
     return counter;
 }
 
-/*
 static void print_hex(uint8_t* data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
@@ -68,7 +67,6 @@ static void print_hex(uint8_t* data, size_t size)
 
     DEBUG("\n");
 }
-*/
 
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
 {
@@ -127,6 +125,8 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     if (ret != CTAP2_OK) {
         return ret;
     }
+
+    print_hex(req.client_data_hash, sizeof(req.client_data_hash));
 
     cbor_helper_encode_attestation_object(encoder, &auth_data, req.client_data_hash);
 
@@ -217,21 +217,21 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
     The signature is r||s, where || denotes concatenation,
     and where both r and s are both big-endian-encoded values that are left-padded to the maximum length
     */
-    ret = cp_ecdsa_sig(r, s, hash, sizeof(hash), 0, g_priv_key);
+    ret = cp_ecdsa_sig(r, s, hash, sizeof(hash), 1, g_priv_key);
 
     //todo: update package version to get up to date macro name
     if (ret == 1) {
         return CTAP2_ERR_PROCESSING;
     }
 
-    sig_to_des_format(r, s, sig, sig_len);
+    sig_to_der_format(r, s, sig, sig_len);
 
     return CTAP2_OK;
 }
 
 /* Encoding signature in ASN.1 DER format */
 /* https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/TechGuidelines/TR03111/BSI-TR-03111_V-2-0_pdf.pdf?__blob=publicationFile&v=2 */
-static void sig_to_des_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
+static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
 {
     uint8_t offset = 0;
 
