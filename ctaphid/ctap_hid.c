@@ -44,7 +44,9 @@ static uint8_t is_init_pkt(ctap_hid_pkt_t* pkt);
 static ctap_hid_buffer_t ctap_buffer;
 
 static kernel_pid_t worker_pid;
-static char worker_stack[8192];
+
+//todo: reduce buffer size !!
+static char worker_stack[16384];
 static void* pkt_worker(void* pkt_raw);
 
 static char stack[2048];
@@ -108,7 +110,7 @@ static void check_timeouts(void)
             is_busy = 0;
             mutex_unlock(&is_busy_mutex);
         }
-        /* delete cid due to inactivity */
+        /* delete cid due to inactivity, todo: delete, and kick most inactive client when space needed */
         else if (cids[i].taken && (now - cids[i].last_used) >= CTAP_HID_INACTIVITY_TIMEOUT) {
             delete_cid(cids[i].cid);
         }
@@ -502,9 +504,11 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     DEBUG("CTAPHID CBOR BYTES TO SENT: %u \n", size);
 
     if (resp.status == CTAP2_OK) {
+        /* status + data */
         ctap_hid_write(cmd, cid, &resp, size + sizeof(uint8_t));
     }
     else {
+        /* status only */
         ctap_hid_write(cmd, cid, &resp.status, sizeof(uint8_t));
     }
 }

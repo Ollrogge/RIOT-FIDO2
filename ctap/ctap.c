@@ -96,6 +96,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
             resp->status = make_credential(&encoder, size, req);
             return cbor_encoder_get_buffer_size(&encoder, buf);
         default:
+            DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
             break;
     }
 
@@ -240,8 +241,38 @@ static void sig_to_des_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
     uint8_t lead_r = 0;
     uint8_t lead_s = 0;
 
+    uint8_t pad_s, pad_r;
+
+    uint8_t i;
+
     bn_write_bin(r_raw, sizeof(r_raw), r);
     bn_write_bin(s_raw, sizeof(s_raw), s);
+
+    /* get leading zeros to save space */
+    for (i = 0; i < sizeof(r_raw); i++) {
+        if (r_raw[i] == 0) {
+            lead_r++;
+        }
+        else {
+            break;
+        }
+    }
+
+    for (i = 0; i < sizeof(s_raw); i++) {
+        if (s_raw[i] == 0) {
+            lead_s++;
+        }
+        else {
+            break;
+        }
+    }
+
+    /*
+        if number is negative after removing leading zeros,
+        pad with 1 zero byte in order to turn number positive again
+    */
+    pad_r = ((r_raw[lead_r] & 0x80) == 0x80);
+    pad_s = ((s_raw[lead_s] & 0x80) == 0x80);
 
     memset(buf, 0, CTAP_ES256_DER_MAX_SIZE);
 
@@ -249,11 +280,13 @@ static void sig_to_des_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
     buf[offset++] = 0x30;
 
     /* length octet (number of content octets) */
-    buf[offset++] = 0x44 - lead_r - lead_s;
+    buf[offset++] = 0x44 + pad_r + pad_s - lead_r - lead_s;
 
     /* integer tag number */
     buf[offset++] = 0x02;
-    buf[offset++] = 0x20 - lead_r;
+    buf[offset + pad_r] = 0x00;
+    buf[offset++] = 0x20 + pad_r - lead_r;
+    offset += pad_r;
 
     memmove(buf + offset, r_raw + lead_r, 32 - lead_r);
 
@@ -261,7 +294,9 @@ static void sig_to_des_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
 
     /* integer tag number */
     buf[offset++] = 0x02;
-    buf[offset++] = 0x20 - lead_s;
+    buf[offset] = 0x00;
+    buf[offset++] = 0x20 + pad_s - lead_s;
+    offset += pad_s;
 
     memmove(buf + offset, s_raw + lead_s, 32 - lead_s);
 

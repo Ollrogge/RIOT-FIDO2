@@ -5,6 +5,10 @@ from fido2.server import Fido2Server
 from binascii import a2b_hex
 from hashlib import sha256
 
+from fastecdsa.curve import P256
+from fastecdsa.encoding.der import DEREncoder
+from fastecdsa import keys, ecdsa
+
 import unittest
 
 dev = None
@@ -62,6 +66,12 @@ class TestInfo(unittest.TestCase):
         resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
 
         print("RESP: ", resp)
+
+        sig = resp.att_statement['sig']
+
+        r, s = DEREncoder.decode_signature(sig)
+
+        print(r, s)
 
         dev.close()
 
