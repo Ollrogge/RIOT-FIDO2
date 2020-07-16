@@ -14,6 +14,8 @@ import unittest
 
 dev = None
 
+RP_ID = "example.com"
+
 def get_device():
     devs = list(CtapHidDevice.list_devices())
     assert len(devs) == 1
@@ -21,7 +23,7 @@ def get_device():
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestInfo(unittest.TestCase):
-    #@unittest.skip
+    @unittest.skip
     def test_info(self):
         try:
             dev = get_device()
@@ -47,7 +49,7 @@ class TestInfo(unittest.TestCase):
         dev.close()
 
     #@unittest.skip
-    def test_make_credential(self):
+    def test_make_credential_and_get_assertion(self):
         try:
             dev = get_device()
         except Exception:
@@ -58,7 +60,7 @@ class TestInfo(unittest.TestCase):
         m = sha256()
         m.update(b"random stuff")
         client_data_hash = m.digest()
-        rp = {"id": "example.com", "name": "Example RP"}
+        rp = {"id": RP_ID, "name": "Example RP"}
         user = {"id": b"user_id", "name": "A. User"}
         key_params = [{"type": "public-key", "alg": -7}]
 
@@ -66,15 +68,24 @@ class TestInfo(unittest.TestCase):
 
         resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
 
-        #print("RESP: ", resp)
+        print("Make credential resp: ", resp)
 
         sig = resp.att_statement['sig']
+        pub_key = resp.auth_data.credential_data.public_key
 
         Attestation.for_type(resp.fmt)().verify(
             resp.att_statement,
             resp.auth_data,
             client_data_hash
         )
+
+        print("")
+
+        resp = ctap2.get_assertion(RP_ID, client_data_hash)
+
+        print("Get assertion resp: ", resp)
+
+        resp.verify(client_data_hash, pub_key)
 
         dev.close()
 

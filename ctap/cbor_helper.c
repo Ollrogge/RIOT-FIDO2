@@ -4,16 +4,11 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
-uint8_t cbor_helper_get_info(CborEncoder* encoder);
-
 static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp);
 static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user);
 static uint8_t parse_pub_key_cred_params(CborValue *it, ctap_pub_key_cred_params_t* params);
 static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32_t* alg_type);
 static uint8_t parse_exclude_list(CborValue *it);
-
-uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key);
 
 static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t len);
@@ -138,8 +133,38 @@ uint8_t cbor_helper_get_info(CborEncoder* encoder)
     return CTAP2_OK;
 }
 
+uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
+                                            uint8_t *client_data_hash, ctap_resident_key_t *rk)
+{
+    int ret;
+    CborEncoder map;
+    uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
+    size_t sig_buf_len;
+
+    ret = cbor_encoder_create_map(encoder, &map, 2);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_int(&map, CTAP_GA_RESP_AUTH_DATA);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    ret = cbor_encode_byte_string(&map, (uint8_t*)auth_data, sizeof(*auth_data));
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    /* get signature for assertion */
+    ctap_get_attest_sig((uint8_t*)auth_data, sizeof(*auth_data), client_data_hash, rk, sig_buf, &sig_buf_len);
+
+    ret = cbor_encode_int(&map, CTAP_GA_RESP_SIGNATURE);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    ret = cbor_encode_byte_string(&map, sig_buf, sig_buf_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encoder_close_container(encoder, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    return CTAP2_OK;
+}
+
 uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash)
+                                              uint8_t *client_data_hash, ctap_resident_key_t *rk)
 {
     int ret;
     CborEncoder map;
@@ -156,14 +181,14 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
 
     /* webauthn specification (version 20190304) section 8.2 */
     /* encode fmt */
-    ret = cbor_encode_int(&map, CTAP_MAKE_CREDENTIAL_RESP_FMT);
+    ret = cbor_encode_int(&map, CTAP_MC_RESP_FMT);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     ret = cbor_encode_text_stringz(&map, "packed");
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* encode auth data */
     // possible optimization: allocate auth_data_buf in ctap.c and cast the binary buf to the needed struct.
-    //total size atm: 148 bytes
+    // total size atm: 148 bytes
     uint8_t auth_data_buf[256];
 
     memmove(auth_data_buf, (void*)&auth_data->header, sizeof(ctap_auth_data_header_t));
@@ -181,17 +206,17 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
 
     offset += cbor_encoder_get_buffer_size(&cose_key, cose_key_buf);
 
-    ret = cbor_encode_int(&map, CTAP_MAKE_CREDENTIAL_RESP_AUTH_DATA);
+    ret = cbor_encode_int(&map, CTAP_MC_RESP_AUTH_DATA);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     ret = cbor_encode_byte_string(&map, auth_data_buf, offset);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* get signature for attesttation statement */
-    ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, sig_buf, &sig_buf_len);
+    ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, rk, sig_buf, &sig_buf_len);
 
     /* encode attestation statement */
 
-    ret = cbor_encode_int(&map, CTAP_MAKE_CREDENTIAL_RESP_ATT_STMT);
+    ret = cbor_encode_int(&map, CTAP_MC_RESP_ATT_STMT);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encoder_create_map(&map, &attest_stmt_map, 2);
@@ -268,6 +293,89 @@ static void print_cbor_hex(uint8_t* req, size_t size)
     DEBUG("\n");
 }
 
+uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size, uint8_t *req_raw)
+{
+    int ret;
+    int key;
+    uint8_t parsed = 0;
+    CborParser parser;
+    CborValue it;
+    CborType type;
+    CborValue map;
+    size_t map_len;
+
+    ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    type = cbor_value_get_type(&it);
+    if (type != CborMapType) return CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
+
+    ret = cbor_value_enter_container(&it, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_value_get_map_length(&it, &map_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    for (size_t i = 0; i < map_len; i++) {
+        type = cbor_value_get_type(&map);
+        if (type != CborIntegerType) return CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
+
+        ret = cbor_value_get_int_checked(&map, &key);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        switch(key)
+        {
+            case CTAP_GA_REQ_RP_ID:
+                DEBUG("CTAP_get_assertion parse rp_id \n");
+                req->rp_id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
+                ret = parse_text_string(&map, (char*)req->client_data_hash, req->rp_id_len);
+                parsed |= CTAP_GA_REQ_RP_ID;
+                break;
+            case CTAP_GA_REQ_CLIENT_DATA_HASH:
+                DEBUG("CTAP_get_assertion parse client_data_hash \n");
+                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_CLIENT_DATA_HASH_SIZE);
+                parsed |= CTAP_GA_REQ_CLIENT_DATA_HASH;
+                break;
+            case CTAP_GA_REQ_ALLOW_LIST:
+                DEBUG("CTAP_get_assertion parse allow_list \n");
+                break;
+            case CTAP_GA_REQ_EXTENSIONS:
+                DEBUG("CTAP_get_assertion parse extensions \n");
+                break;
+            case CTAP_GA_REQ_OPTIONS:
+                DEBUG("CTAP_get_assertion parse options \n");
+                break;
+            case CTAP_GA_REQ_PIN_AUTH:
+                DEBUG("CTAP_get_assertion parse pin_auth \n");
+                break;
+            case CTAP_GA_REQ_PIN_PROTOCOL:
+                DEBUG("CTAP_get_assertion parse pin_protocol \n");
+                break;
+            default:
+                DEBUG("CTAP_get_assertion unknown key: %d \n", key);
+                break;
+        }
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+     /* rp_id and client_data_hash are mandatory */
+    if (!((parsed & (CTAP_GA_REQ_RP_ID | CTAP_GA_REQ_CLIENT_DATA_HASH)) ==
+        (CTAP_GA_REQ_RP_ID | CTAP_GA_REQ_CLIENT_DATA_HASH))) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
+    return CTAP2_OK;
+}
+
 uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size, uint8_t* req_raw)
 {
     int ret;
@@ -317,7 +425,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 ret = parse_user(&map, &req->user);
                 break;
             case CTAP_MC_REQ_PUB_KEY_CRED_PARAMS:
-                DEBUG("CTAP make_credential parse key_cred params \n");
+                DEBUG("CTAP_make_credential parse key_cred params \n");
                 ret = parse_pub_key_cred_params(&map, &req->cred_params);
                 break;
             case CTAP_MC_REQ_EXCLUDE_LIST:
@@ -325,18 +433,19 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 ret = parse_exclude_list(&map);
                 break;
             case CTAP_MC_REQ_EXTENSIONS:
-                DEBUG("CTAP make_credential parse exclude_list \n");
+                DEBUG("CTAP_make_credential parse exclude_list \n");
                 break;
             case CTAP_MC_REQ_OPTIONS:
-                DEBUG("CTAP make_credential parse options \n");
+                DEBUG("CTAP_make_credential parse options \n");
                 break;
             case CTAP_MC_REQ_PIN_AUTH:
-                DEBUG("CTAP make_credential parse pin_auth \n");
+                DEBUG("CTAP_make_credential parse pin_auth \n");
                 break;
             case CTAP_MC_REQ_PIN_PROTOCOL:
-                DEBUG("CTAP make_credential parse pin_protocol \n");
+                DEBUG("CTAP_make_credential parse pin_protocol \n");
                 break;
             default:
+                DEBUG("CTAP_make_credential unknown key: %d \n", key);
                 break;
         }
 
@@ -394,23 +503,26 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
             rp->id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
 
             ret = parse_text_string(&map, (char*)rp->id, rp->id_len);
-            if (ret != 0) {
+            if (ret != CborNoError) {
                 return ret;
             }
 
+            rp->id[CTAP_DOMAIN_NAME_MAX_SIZE] = 0;
             id_parsed = 1;
         }
         else if (strcmp(key, "name") == 0) {
             ret = parse_text_string(&map, (char*)rp->name, CTAP_RP_MAX_NAME_SIZE);
-            if (ret != 0) {
+            if (ret != CborNoError) {
                 return ret;
             }
+            rp->name[CTAP_RP_MAX_NAME_SIZE] = 0;
         }
         else if (strcmp(key, "icon") == 0) {
             ret = parse_text_string(&map, (char*)rp->icon, CTAP_DOMAIN_NAME_MAX_SIZE);
             if (ret != 0) {
                 return ret;
             }
+            rp->icon[CTAP_DOMAIN_NAME_MAX_SIZE] = 0;
         }
         else {
             DEBUG("CTAP_parse_rp: ignoring unknown key: %s \n", key);

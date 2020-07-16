@@ -25,10 +25,6 @@
 #define CTAP_GET_INFO_RESP_MAX_MSG_SIZE     0x05 /* Maximum message size supported by the authenticator */
 #define CTAP_GET_INFO_RESP_PIN_PROTOCOLS    0x06 /* List of supported PIN Protocol versions */
 
-#define CTAP_MAKE_CREDENTIAL_RESP_FMT       0x01
-#define CTAP_MAKE_CREDENTIAL_RESP_AUTH_DATA 0x02
-#define CTAP_MAKE_CREDENTIAL_RESP_ATT_STMT  0x03
-
 #define CTAP_AUTH_DATA_FLAG_UP     (1 << 0) /* user present */
 #define CTAP_AUTH_DATA_FLAG_UV     (1 << 2) /* user verified */
 #define CTAP_AUTH_DATA_FLAG_AT     (1 << 6) /* attested credential data included */
@@ -115,6 +111,24 @@
 #define CTAP_MC_REQ_PIN_AUTH            0x08
 #define CTAP_MC_REQ_PIN_PROTOCOL        0x09
 
+#define CTAP_MC_RESP_FMT                0x01
+#define CTAP_MC_RESP_AUTH_DATA          0x02
+#define CTAP_MC_RESP_ATT_STMT           0x03
+
+#define CTAP_GA_REQ_RP_ID               0x01
+#define CTAP_GA_REQ_CLIENT_DATA_HASH    0x02
+#define CTAP_GA_REQ_ALLOW_LIST          0x03
+#define CTAP_GA_REQ_EXTENSIONS          0x04
+#define CTAP_GA_REQ_OPTIONS             0x05
+#define CTAP_GA_REQ_PIN_AUTH            0x06
+#define CTAP_GA_REQ_PIN_PROTOCOL        0x07
+
+#define CTAP_GA_RESP_CREDENTIAL             0x01
+#define CTAP_GA_RESP_AUTH_DATA              0x02
+#define CTAP_GA_RESP_SIGNATURE              0x03
+#define CTAP_GA_RESP_USER                   0x04
+#define CTAP_GA_RESP_NUMBER_OF_CREDENTIALS  0x05
+
 /**
  * 128 bit identifier indentifying type of authenticator
  * Todo: how to set this based on being in a generic OS ?
@@ -150,18 +164,22 @@
  */
 typedef struct ctap_resp ctap_resp_t;
 
+/**
+ * @brief Ctap resident key forward declaration
+ */
+typedef struct ctap_resident_key ctap_resident_key_t;
+
 
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
 void ctap_init(void);
-uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t size, uint8_t *client_data_hash,
-                            uint8_t *sig, size_t *sig_len);
+uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
+                            ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len);
 
 typedef struct __attribute__((packed))
 {
     uint8_t cred_type;
     int32_t alg_type;
 } ctap_pub_key_cred_params_t;
-
 
 typedef struct
 {
@@ -194,11 +212,18 @@ typedef struct
 typedef struct
 {
     /* webauthn specification (version 20190304) section 5.10.1 */
-    uint8_t client_data_hash[CTAP_CLIENT_DATA_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
+    uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
     ctap_rp_ent_t rp; /* Relying party */
     ctap_user_ent_t user; /* user */
     ctap_pub_key_cred_params_t cred_params;
 } ctap_make_credential_req_t;
+
+typedef struct
+{
+    uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying Party Identifier */
+    size_t rp_id_len;
+    uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
+} ctap_get_assertion_req_t;
 
 #define CTAP_CREDENTIAL_ID_SIZE 16
 
@@ -207,14 +232,6 @@ typedef struct
 {
     uint8_t id[CTAP_CREDENTIAL_ID_SIZE]; /* At least 16 bytes that include at least 100 bits of entropy */
 } cred_id_t;
-
-typedef struct
-{
-    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE]; /* At least 16 bytes that include at least 100 bits of entropy */
-    uint8_t user_id[CTAP_USER_ID_MAX_SIZE ]; /* RP-specific user account id */
-    uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* Relying party identifier (domain string) */
-} ctap_resident_key_t;
-
 
 /*
 At registration time, the authenticator creates an asymmetric key pair,
@@ -254,7 +271,7 @@ typedef struct
 /* part of attestation object  https://www.w3.org/TR/webauthn/#attestation-object */
 typedef struct __attribute__((packed))
 {
-    uint8_t rp_id_hash[32];
+    uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
     uint8_t flags;
     uint32_t counter;
 } ctap_auth_data_header_t;
@@ -264,6 +281,14 @@ typedef struct
     ctap_auth_data_header_t header;
     ctap_attested_cred_data_t attested_cred_data;
 } ctap_auth_data_t;
+
+/* https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source */
+struct __attribute__((packed)) ctap_resident_key
+{
+    uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
+    uint8_t priv_key[32];
+};
+
 
 #endif
 
