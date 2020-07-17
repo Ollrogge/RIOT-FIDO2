@@ -203,6 +203,13 @@ typedef struct
 
 typedef struct
 {
+    bool rk; /* resident key */
+    bool uv; /* user verification */
+    bool up; /* user presence */
+} ctap_options_t;
+
+typedef struct
+{
     uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying party identifier (domain string) */
     size_t id_len;
     uint8_t name[CTAP_RP_MAX_NAME_SIZE + 1];        /* human friendly RP name */
@@ -216,6 +223,7 @@ typedef struct
     ctap_rp_ent_t rp; /* Relying party */
     ctap_user_ent_t user; /* user */
     ctap_pub_key_cred_params_t cred_params;
+    ctap_options_t options; /* parameters to influence authenticator operation */
 } ctap_make_credential_req_t;
 
 typedef struct
@@ -223,6 +231,7 @@ typedef struct
     uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];  /* Relying Party Identifier */
     size_t rp_id_len;
     uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
+    ctap_options_t options; /* parameters to influence authenticator operation */
 } ctap_get_assertion_req_t;
 
 #define CTAP_CREDENTIAL_ID_SIZE 16

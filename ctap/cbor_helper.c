@@ -9,6 +9,7 @@ static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user);
 static uint8_t parse_pub_key_cred_params(CborValue *it, ctap_pub_key_cred_params_t* params);
 static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32_t* alg_type);
 static uint8_t parse_exclude_list(CborValue *it);
+static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key);
 
 static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t len);
@@ -347,6 +348,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 break;
             case CTAP_GA_REQ_OPTIONS:
                 DEBUG("CTAP_get_assertion parse options \n");
+                ret = parse_options(&map, &req->options);
                 break;
             case CTAP_GA_REQ_PIN_AUTH:
                 DEBUG("CTAP_get_assertion parse pin_auth \n");
@@ -437,6 +439,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 break;
             case CTAP_MC_REQ_OPTIONS:
                 DEBUG("CTAP_make_credential parse options \n");
+                ret = parse_options(&map, &req->options);
                 break;
             case CTAP_MC_REQ_PIN_AUTH:
                 DEBUG("CTAP_make_credential parse pin_auth \n");
@@ -698,6 +701,63 @@ static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     return 0;
+}
+
+static uint8_t parse_options(CborValue *it, ctap_options_t *options)
+{
+    int ret;
+    int type;
+    CborValue map;
+    size_t map_len;
+    char key[8];
+    size_t key_len = sizeof(key);
+    bool b;
+
+    type = cbor_value_get_type(it);
+    if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+    ret = cbor_value_enter_container(it, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_value_get_map_length(it, &map_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    for (size_t i = 0; i < map_len; i++) {
+        type = cbor_value_get_type(&map);
+        if (type != CborTextStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+        ret = cbor_value_copy_text_string(&map, key, &key_len, NULL);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        key[sizeof(key) - 1] = 0;
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        type = cbor_value_get_type(&map);
+        if (type != CborBooleanType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+        ret = cbor_value_get_boolean(&map, &b);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        if (strncmp(key, "rk", 2) == 0) {
+            options->rk = b;
+        }
+        else if (strncmp(key, "uv", 2) == 0) {
+            options->uv = b;
+        }
+        else if (strncmp(key, "up", 2) == 0) {
+            options->up = b;
+        }
+        else {
+            DEBUG("Ctap parse options, unknown uption: %s \n", key);
+        }
+
+        cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    return CTAP2_OK;
 }
 
 static uint8_t parse_exclude_list(CborValue *it)

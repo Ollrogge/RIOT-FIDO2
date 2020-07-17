@@ -130,6 +130,9 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
+    DEBUG("Make credential options: %d %d %d \n", req.options.rk,
+            req.options.up, req.options.uv);
+
     ret = make_auth_data_attest(&req.rp, &req.cred_params, &auth_data, &rk);
 
     if (ret != CTAP2_OK) {
