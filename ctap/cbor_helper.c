@@ -8,7 +8,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp);
 static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user);
 static uint8_t parse_pub_key_cred_params(CborValue *it, ctap_pub_key_cred_params_t* params);
 static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32_t* alg_type);
-static uint8_t parse_exclude_list(CborValue *it);
+static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len);
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key);
 
@@ -20,10 +20,16 @@ static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type);
 
 static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type)
 {
-    (void)cred_type;
-    (void)alg_type;
     DEBUG("cred_params_supported cred_type: %u alg_type: %ld \n", cred_type, alg_type);
-    return 1;
+
+    if (cred_type == CTAP_PUB_KEY_CRED_PUB_KEY) {
+
+        if (alg_type == CTAP_COSE_ALG_ES256) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 /* CTAP specification (version 20190130) section 5.4 */
@@ -432,7 +438,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 break;
             case CTAP_MC_REQ_EXCLUDE_LIST:
                 DEBUG("CTAP_make_credential parse excludeList \n");
-                ret = parse_exclude_list(&map);
+                ret = parse_exclude_list(&map, &req->exclude_list, &req->exclude_list_len);
                 break;
             case CTAP_MC_REQ_EXTENSIONS:
                 DEBUG("CTAP_make_credential parse exclude_list \n");
@@ -690,7 +696,7 @@ static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32
 
     type_str[sizeof(type_str) - 1] = 0;
 
-    if (strcmp(type_str, "public-key") == 0) {
+    if (strncmp(type_str, "public-key", 11) == 0) {
         *cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
     }
     else {
@@ -703,6 +709,7 @@ static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32
     return 0;
 }
 
+/* parse options dictionary */
 static uint8_t parse_options(CborValue *it, ctap_options_t *options)
 {
     int ret;
@@ -760,9 +767,64 @@ static uint8_t parse_options(CborValue *it, ctap_options_t *options)
     return CTAP2_OK;
 }
 
-static uint8_t parse_exclude_list(CborValue *it)
+static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len)
 {
-    (void)it;
+    int ret;
+    int type;
+
+    type = cbor_value_get_type(it);
+    if (type != CborArrayType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+    ret = cbor_value_get_array_length(it, exclude_list_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    ret = cbor_value_enter_container(it, exclude_list);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    return CTAP2_OK;
+}
+
+uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_t *cred)
+{
+    int ret;
+    int type;
+    CborValue val;
+    char type_str[16];
+    size_t buf_len;
+
+    type = cbor_value_get_type(arr);
+    if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+    ret = cbor_value_map_find_value(arr, "type", &val);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    type = cbor_value_get_type(&val);
+    if (type != CborTextStringType) return CTAP2_ERR_MISSING_PARAMETER;
+
+    buf_len = sizeof(type_str);
+
+    ret = cbor_value_copy_text_string(&val, type_str, &buf_len, NULL);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    type_str[sizeof(type_str) - 1] = 0;
+
+    if (strncmp(type_str, "public-key", 11) == 0) {
+        cred->cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
+    }
+    else {
+        cred->cred_type = CTAP_PUB_KEY_CRED_UNKNOWN;
+    }
+
+    ret = cbor_value_map_find_value(arr, "id", &val);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    type = cbor_value_get_type(&val);
+    if (type != CborByteStringType) return CTAP2_ERR_MISSING_PARAMETER;
+
+    buf_len = sizeof(cred->cred_id);
+    ret = cbor_value_copy_byte_string(&val, cred->cred_id, &buf_len, NULL);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    if (buf_len != sizeof(cred->cred_id)) return CTAP2_ERR_MISSING_PARAMETER;
+
     return CTAP2_OK;
 }
 

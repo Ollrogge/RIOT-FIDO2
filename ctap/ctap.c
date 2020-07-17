@@ -6,8 +6,6 @@
 
 #include "ctap.h"
 
-#include "cbor.h"
-
 #include "cbor_helper.h"
 
 #include "xtimer.h"
@@ -132,6 +130,12 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
     DEBUG("Make credential options: %d %d %d \n", req.options.rk,
             req.options.up, req.options.uv);
+
+
+    // todo: implement
+    for (size_t i = 0; i < req.exclude_list_len; i++) {
+        continue;
+    }
 
     ret = make_auth_data_attest(&req.rp, &req.cred_params, &auth_data, &rk);
 
@@ -364,8 +368,8 @@ static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
     }
 
     /*
-        if number is negative after removing leading zeros,
-        pad with 1 zero byte in order to turn number positive again
+    if number is negative after removing leading zeros,
+    pad with 1 zero byte in order to turn number positive again
     */
     pad_r = ((r_raw[lead_r] & 0x80) == 0x80);
     pad_s = ((s_raw[lead_s] & 0x80) == 0x80);

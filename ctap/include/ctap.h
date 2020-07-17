@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "cbor.h"
+
 /**
 * CTAP specification (version 20190130) section 6:
 * By default, authenticators MUST support messages of at least 1024 bytes
@@ -158,6 +160,7 @@
 /* https://stackoverflow.com/questions/17269238/ecdsa-signature-length */
 #define CTAP_ES256_DER_MAX_SIZE 72
 
+#define CTAP_CREDENTIAL_ID_SIZE 16
 
 /**
  * @brief Ctap resp struct forward declaration
@@ -195,11 +198,12 @@ struct ctap_resp
     uint8_t data[CTAP_MAX_MSG_SIZE];
 };
 
-/* webauthn specification (version 20190304) section 5.10.3 */
+/* webauthn specification (version 20190304) section 5.8.3 */
 typedef struct
 {
     uint8_t cred_type;
-} ctap_credential_desc_t;
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
+} ctap_cred_desc_t;
 
 typedef struct
 {
@@ -224,6 +228,8 @@ typedef struct
     ctap_user_ent_t user; /* user */
     ctap_pub_key_cred_params_t cred_params;
     ctap_options_t options; /* parameters to influence authenticator operation */
+    CborValue exclude_list; /* cbor array holding exclude list */
+    size_t exclude_list_len;
 } ctap_make_credential_req_t;
 
 typedef struct
@@ -233,28 +239,6 @@ typedef struct
     uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
     ctap_options_t options; /* parameters to influence authenticator operation */
 } ctap_get_assertion_req_t;
-
-#define CTAP_CREDENTIAL_ID_SIZE 16
-
-/* webauthn specification (version 20190304) section 4 */
-typedef struct
-{
-    uint8_t id[CTAP_CREDENTIAL_ID_SIZE]; /* At least 16 bytes that include at least 100 bits of entropy */
-} cred_id_t;
-
-/*
-At registration time, the authenticator creates an asymmetric key pair,
-and stores its private key portion and information from the Relying Party
-into a public key credential source.
-*/
-/* webauthn specification (version 20190304) section 4 */
-typedef struct
-{
-    uint8_t cred_type; /* PublicKeyCredentialType */
-    cred_id_t id; /* credential id */
-    uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1]; /* Relying Party Identifier */
-    ctap_user_ent_t user_handle;
-} cred_source_t;
 
 typedef struct
 {
