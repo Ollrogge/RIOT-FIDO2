@@ -6,6 +6,8 @@
 
 #include "ctap.h"
 
+#include "ctap_hid.h"
+
 #include "cbor_helper.h"
 
 #include "xtimer.h"
@@ -52,7 +54,7 @@ static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter)
         sign counter is big endian
         todo: check for endianess of system?
     */
-    uint8_t *byte = (uint8_t*) &auth_data_counter;
+    uint8_t *byte = (uint8_t*)auth_data_counter;
     *byte++ = (counter >> 24) & 0xff;
     *byte++ = (counter >> 16) & 0xff;
     *byte++ = (counter >> 8) & 0xff;
@@ -61,7 +63,6 @@ static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter)
     return counter;
 }
 
-/*
 static void print_hex(uint8_t* data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
@@ -70,7 +71,6 @@ static void print_hex(uint8_t* data, size_t size)
 
     DEBUG("\n");
 }
-*/
 
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
 {
@@ -97,11 +97,13 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
         case CTAP_MAKE_CREDENTIAL:
             DEBUG("CTAP MAKE CREDENTIAL \n");
             resp->status = make_credential(&encoder, size, req);
+            print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_ASSERTION:
             DEBUG("CTAP GET_ASSERTION \n");
             resp->status = get_assertion(&encoder, size, req);
+            print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         default:
@@ -198,6 +200,7 @@ static void load_rk(ctap_resident_key_t *rk)
 
 static void save_rk(ctap_resident_key_t *rk)
 {
+    //todo: save struct in first page with info where in flash keys are
     int ret;
     uint8_t page[FLASHPAGE_SIZE];
 
@@ -220,8 +223,8 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth
     get_auth_data_sign_count(&counter);
     auth_data->counter = counter;
 
-    /* silent authentication */
-    auth_data->flags = 0;
+    /* todo: faking user presence because it is necessary for registration */
+    auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;
 
     return CTAP2_OK;
 }
@@ -236,13 +239,15 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
     ctap_auth_data_header_t* auth_header = &auth_data->header;
 
     /* sha256 of relying party id */
+    DEBUG("rp id: %s len: %u \n", rp->id, rp->id_len);
     sha256(rp->id, rp->id_len, auth_header->rp_id_hash);
-
-    memmove(rk->rp_id_hash, auth_header->rp_id_hash, CTAP_SHA256_HASH_SIZE);
-
     /* set flag indicating that attested credential data included */
     auth_header->flags |= CTAP_AUTH_DATA_FLAG_AT;
 
+    /* todo: faking user presence because it is necessary for registration */
+    auth_header->flags |= CTAP_AUTH_DATA_FLAG_UP;
+
+    
     /* get sign counter */
     uint32_t counter = 0;
     get_auth_data_sign_count(&counter);
@@ -256,7 +261,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
     memmove(cred_header->aaguid, &aaguid, sizeof(cred_header->aaguid));
 
     /* generate credential id */
-    get_random_sequence(cred_header->cred_id, CTAP_CREDENTIAL_ID_SIZE);
+    get_random_sequence(cred_header->cred_id, sizeof(cred_header->cred_id));
     cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
     cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 
@@ -283,6 +288,11 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
 
     cred_data->pub_key.params.alg_type = cred_params->alg_type;
     cred_data->pub_key.params.cred_type = cred_params->cred_type;
+
+    /* init resident key struct */
+    memmove(rk->rp_id_hash, auth_header->rp_id_hash, CTAP_SHA256_HASH_SIZE);
+    memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(cred_header->cred_id));
+    rk->cred_desc.cred_type = cred_params->cred_type;
 
     return CTAP2_OK;
 }

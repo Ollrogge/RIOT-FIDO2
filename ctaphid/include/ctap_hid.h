@@ -47,10 +47,14 @@
 #define CTAP_HID_ERROR_INVALID_CHANNEL 0x0b     /* CID is not valid. */
 #define CTAP_HID_ERROR_OTHER 0x7f               /* Unspecified error */
 
+#define CTAP_HID_STATUS_PROCESSING 0x01
+#define CTAP_HID_STATUS_UPNEEDED   0x02
+
 #define CTAP_HID_CIDS_MAX 0x08
 
 void ctap_hid_create(void);
 void ctap_hid_handle_packet(uint8_t *pkt_raw);
+void ctap_hid_send_keepalive(uint8_t status);
 
 typedef struct
 {

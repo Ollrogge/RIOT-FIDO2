@@ -381,6 +381,9 @@ static void* pkt_worker(void* arg)
             }
             else {
                 switch(cmd) {
+                    case CTAP_HID_COMMAND_MSG:
+                        DEBUG("CTAP_HID: MSG COMMAND \n");
+                        break;
                     case CTAP_HID_COMMAND_CBOR:
                         DEBUG("CTAP_HID: CBOR COMMAND \n");
                         handle_cbor_packet(cid, bcnt, cmd, buf);
@@ -397,7 +400,7 @@ static void* pkt_worker(void* arg)
                         DEBUG("CTAP_HID: cancel \n");
                         break;
                     default:
-                        DEBUG("Ctaphid: unknown command \n");
+                        DEBUG("Ctaphid: unknown command %u \n", cmd);
                 }
             }
         }
@@ -501,16 +504,21 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     memset(&resp, 0, sizeof(ctap_resp_t));
     size = ctap_handle_request(payload, bcnt, &resp);
 
-    DEBUG("CTAPHID CBOR BYTES TO SENT: %u \n", size);
+    DEBUG("CTAPHID CBOR BYTES TO SENT: %u %u\n", size, resp.status);
 
     if (resp.status == CTAP2_OK) {
         /* status + data */
-        ctap_hid_write(cmd, cid, &resp, size + sizeof(uint8_t));
+        ctap_hid_write(cmd, cid, &resp, size + sizeof(resp.status));
     }
     else {
         /* status only */
-        ctap_hid_write(cmd, cid, &resp.status, sizeof(uint8_t));
+        ctap_hid_write(cmd, cid, &resp.status, sizeof(resp.status));
     }
+}
+
+void ctap_hid_send_keepalive(uint8_t status)
+{
+    ctap_hid_write(CTAP_HID_COMMAND_KEEPALIVE, ctap_buffer.cid, &status, sizeof(status));
 }
 
 static void send_error_response(uint32_t cid, uint8_t err)

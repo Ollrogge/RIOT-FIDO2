@@ -40,7 +40,9 @@
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_UP         "up"           /* user presence */
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_UV         "uv"           /* user verification */
 
-#define CTAP_VERSION_STRING_FIDO "FIDO_2_0"
+#define CTAP_VERSION_STRING_FIDO_PRE "FIDO_2_1_PRE"
+#define CTAP_VERSION_STRING_FIDO     "FIDO_2_0"
+#define CTAP_VERSION_STRING_U2F_V2   "U2F_V2"
 
 #define CTAP2_OK                            0x00
 #define CTAP1_ERR_INVALID_COMMAND           0x01
@@ -88,6 +90,7 @@
 #define CTAP2_ERR_PIN_TOKEN_EXPIRED         0x38
 #define CTAP2_ERR_REQUEST_TOO_LARGE         0x39
 #define CTAP2_ERR_ACTION_TIMEOUT            0x3A
+#define CTAP2_ERR_UP_REQUIRED               0x3B
 #define CTAP1_ERR_OTHER                     0x7F
 #define CTAP2_ERR_SPEC_LAST                 0xDF
 #define CTAP2_ERR_EXTENSION_FIRST           0xE0
@@ -134,10 +137,11 @@
 /**
  * 128 bit identifier indentifying type of authenticator
  * Todo: how to set this based on being in a generic OS ?
+ *
+ * aaguid was randomly chosen for testing
  */
-#define DEVICE_AAGUID 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
-                      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-
+#define DEVICE_AAGUID 0x9c, 0x29, 0x58, 0x65, 0xfa, 0x2c, 0x36, 0xb7, \
+                      0x05, 0xa4, 0x23, 0x20, 0xaf, 0x9c, 0x8f, 0x16
 
 #define CTAP_CLIENT_DATA_HASH_SIZE 32 /* sha256 */
 
@@ -278,6 +282,7 @@ typedef struct
 /* https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source */
 struct __attribute__((packed)) ctap_resident_key
 {
+    ctap_cred_desc_t cred_desc;
     uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
     uint8_t priv_key[32];
 };

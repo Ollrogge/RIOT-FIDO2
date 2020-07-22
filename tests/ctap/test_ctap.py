@@ -3,6 +3,7 @@ from fido2.ctap2 import CTAP2, AttestationObject, AttestedCredentialData
 from fido2.attestation import Attestation
 from fido2.client import Fido2Client
 from fido2.server import Fido2Server
+from getpass import getpass
 from binascii import a2b_hex
 from hashlib import sha256
 
@@ -23,8 +24,10 @@ def get_device():
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestInfo(unittest.TestCase):
-    @unittest.skip
+    #@unittest.skip
     def test_info(self):
+        print()
+        print("*** test_info ***")
         try:
             dev = get_device()
         except Exception:
@@ -35,11 +38,15 @@ class TestInfo(unittest.TestCase):
             ctap2 = CTAP2(dev)
             info = ctap2.get_info()
 
+            print("Info: ", info)
+            print("")
+
             self.assertEqual(info.versions, ['FIDO_2_0'])
-            self.assertEqual(info.aaguid, a2b_hex("00000000000000000000000000000000"))
+            self.assertEqual(info.aaguid, a2b_hex("9c295865fa2c36b705a42320af9c8f16"))
+                                                  
             self.assertEqual(info.options, {
                 'rk': True,
-                'up': False,
+                'up': True,
                 'plat': False
             })
             self.assertEqual(info.max_msg_size, 1024)
@@ -47,8 +54,76 @@ class TestInfo(unittest.TestCase):
             print("Device does not support CBOR")
 
         dev.close()
-
+    
     #@unittest.skip
+    def test_make_credential_and_get_assertion2(self):
+        print()
+        print("*** test_make_credential_and_get_assertion ***")
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        use_prompt = False
+        pin = None
+        uv = "discouraged"
+
+        client = Fido2Client(dev, "https://example.com")
+            # Prefer UV if supported
+        if client.info.options.get("uv"):
+            uv = "preferred"
+            print("Authenticator supports User Verification")
+        elif client.info.options.get("clientPin"):
+            # Prompt for PIN if needed
+            pin = getpass("Please enter PIN: ")
+        else:
+            print("PIN not set, won't use")
+
+        server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
+        user = {"id": b"user_id", "name": "A. User"}
+
+        # Prepare parameters for makeCredential
+        create_options, state = server.register_begin(user, user_verification=uv)
+        
+        attestation_object, client_data = client.make_credential(
+            create_options["publicKey"], pin=pin)
+
+        # Complete registration
+        auth_data = server.register_complete(state, client_data, attestation_object)
+        credentials = [auth_data.credential_data]
+
+        print("New credential created!")
+
+        print("CLIENT DATA:", client_data)
+        print("ATTESTATION OBJECT:", attestation_object)
+        print()
+        print("CREDENTIAL DATA:", auth_data.credential_data)
+
+        # Prepare parameters for getAssertion
+        request_options, state = server.authenticate_begin(credentials, user_verification=uv)
+
+        assertions, client_data = client.get_assertion(request_options["publicKey"], pin=pin)
+        assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
+
+        # Complete authenticator
+        server.authenticate_complete(
+            state,
+            credentials,
+            assertion.credential["id"],
+            client_data,
+            assertion.auth_data,
+            assertion.signature,
+        )
+
+        print("Credential authenticated!")
+
+        print("CLIENT DATA:", client_data)
+        print()
+        print("ASSERTION DATA:", assertion)
+
+'''
+    @unittest.skip
     def test_make_credential_and_get_assertion(self):
         try:
             dev = get_device()
@@ -88,6 +163,7 @@ class TestInfo(unittest.TestCase):
         resp.verify(client_data_hash, pub_key)
 
         dev.close()
+'''
 
 if __name__ == '__main__':
     unittest.main()
