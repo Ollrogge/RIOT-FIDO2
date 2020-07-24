@@ -8,6 +8,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp);
 static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user);
 static uint8_t parse_pub_key_cred_params(CborValue *it, ctap_pub_key_cred_params_t* params);
 static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32_t* alg_type);
+static uint8_t parse_allow_list(CborValue *it, CborValue *allow_list, size_t *allow_list_len);
 static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len);
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t *pub_key);
@@ -351,6 +352,9 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
     CborValue map;
     size_t map_len;
 
+    DEBUG("Get assertion req cbor: ");
+    print_cbor_hex(req_raw, size);
+
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
@@ -388,6 +392,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 break;
             case CTAP_GA_REQ_ALLOW_LIST:
                 DEBUG("CTAP_get_assertion parse allow_list \n");
+                ret = parse_allow_list(&map, &req->allow_list, &req->allow_list_len);
                 break;
             case CTAP_GA_REQ_EXTENSIONS:
                 DEBUG("CTAP_get_assertion parse extensions \n");
@@ -434,6 +439,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
     size_t map_len;
     CborType type;
 
+    DEBUG("Make credential req cbor: ");
     print_cbor_hex(req_raw, size);
 
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
@@ -812,6 +818,11 @@ static uint8_t parse_options(CborValue *it, ctap_options_t *options)
     }
 
     return CTAP2_OK;
+}
+
+static uint8_t parse_allow_list(CborValue *it, CborValue *allow_list, size_t *allow_list_len)
+{
+    return parse_exclude_list(it, allow_list, allow_list_len);
 }
 
 static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len)

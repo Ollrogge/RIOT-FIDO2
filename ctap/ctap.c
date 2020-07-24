@@ -97,14 +97,19 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
         case CTAP_MAKE_CREDENTIAL:
             DEBUG("CTAP MAKE CREDENTIAL \n");
             resp->status = make_credential(&encoder, size, req);
+            DEBUG("make cred resp: ");
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_ASSERTION:
             DEBUG("CTAP GET_ASSERTION \n");
             resp->status = get_assertion(&encoder, size, req);
+            DEBUG("get assertion resp: ");
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
+            break;
+        case CTAP_GET_NEXT_ASSERTION:
+            DEBUG("CTAP GET NEXT ASSERTION \n");
             break;
         default:
             DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
@@ -134,11 +139,6 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
             req.options.up, req.options.uv);
 
 
-    // todo: implement
-    for (size_t i = 0; i < req.exclude_list_len; i++) {
-        continue;
-    }
-
     ret = make_auth_data_attest(&req.rp, &req.cred_params, &auth_data, &rk);
 
     if (ret != CTAP2_OK) {
@@ -163,6 +163,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     ctap_get_assertion_req_t req;
     ctap_resident_key_t rk;
     ctap_auth_data_header_t auth_data;
+    ctap_cred_desc_t cred_desc;
 
     memset(&req, 0, sizeof(req));
 
@@ -170,6 +171,17 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 
     if (ret != CTAP2_OK) {
         return ret;
+    }
+
+    for (size_t i = 0; i < req.allow_list_len; i++) {
+        ret = parse_cred_desc(&req.allow_list, &cred_desc);
+
+        DEBUG("Cred desc: ");
+        print_hex(cred_desc.cred_id, sizeof(cred_desc.cred_id));
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
     }
 
     ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data);
@@ -208,7 +220,7 @@ static void save_rk(ctap_resident_key_t *rk)
 
     ret = flashpage_write_and_verify(20, page);
 
-    DEBUG("SAVE RK RETURN: %d \n", ret);
+    (void)ret;
 }
 
 static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data)
@@ -239,7 +251,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
     ctap_auth_data_header_t* auth_header = &auth_data->header;
 
     /* sha256 of relying party id */
-    DEBUG("rp id: %s len: %u \n", rp->id, rp->id_len);
     sha256(rp->id, rp->id_len, auth_header->rp_id_hash);
     /* set flag indicating that attested credential data included */
     auth_header->flags |= CTAP_AUTH_DATA_FLAG_AT;

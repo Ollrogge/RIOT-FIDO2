@@ -242,6 +242,8 @@ typedef struct
     size_t rp_id_len;
     uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE]; /* SHA-256 hash of JSON serialized client data */
     ctap_options_t options; /* parameters to influence authenticator operation */
+    CborValue allow_list; /* cbor array holding exclude list */
+    size_t allow_list_len;
 } ctap_get_assertion_req_t;
 
 typedef struct

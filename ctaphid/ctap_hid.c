@@ -383,6 +383,7 @@ static void* pkt_worker(void* arg)
                 switch(cmd) {
                     case CTAP_HID_COMMAND_MSG:
                         DEBUG("CTAP_HID: MSG COMMAND \n");
+                        send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
                         break;
                     case CTAP_HID_COMMAND_CBOR:
                         DEBUG("CTAP_HID: CBOR COMMAND \n");
@@ -506,7 +507,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
     DEBUG("CTAPHID CBOR BYTES TO SENT: %u %u\n", size, resp.status);
 
-    if (resp.status == CTAP2_OK) {
+    if (resp.status == CTAP2_OK && size >= 0) {
         /* status + data */
         ctap_hid_write(cmd, cid, &resp, size + sizeof(resp.status));
     }
@@ -537,15 +538,13 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
     resp.cid = cid_new;
     memmove(resp.nonce, nonce, 8);
     resp.protocol_version = CTAP_HID_PROTOCOL_VERSION;
-    resp.version_major = 0; //?
-    resp.version_minor = 0; //?
-    resp.build_version = 0; //?
+    resp.version_major = 0; 
+    resp.version_minor = 0; 
+    resp.build_version = 0; 
 
     uint8_t cmd = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
 
-    // USB_HID_CTAP_CAPABILITY_NMSG because no CTAP1 / U2F for now
     resp.capabilities = CTAP_HID_CAPABILITY_CBOR | CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
-    //resp.capabilities = CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
 
     ctap_hid_write(cmd, cid_old, &resp, sizeof(ctap_hid_init_resp_t));
 }
