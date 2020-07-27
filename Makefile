@@ -3,12 +3,18 @@ APPLICATION=FIDO2
 
 BOARD ?= nrf52840dk
 
-RIOTBASE ?= RIOT
+RIOTBASE ?= $(CURDIR)/RIOT
 
 EXTERNAL_MODULE_DIRS += ./ctap
 EXTERNAL_MODULE_DIRS += ./ctaphid
 
 DEVELHELP ?= 1
+
+FEATURES_REQUIRED += periph_flashpage
+
+USEMODULE += shell
+USEMODULE += shell_commands
+USEMODULE += ps
 
 USEMODULE += usbus_hid
 USEMODULE += ctaphid
