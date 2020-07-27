@@ -116,7 +116,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
             break;
     }
 
-    return -1;
+    return 0;
 }
 
 /* CTAP specification (version 20190130) section 5.1 */
@@ -322,7 +322,7 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
 
     sha256_init(&ctx);
     sha256_update(&ctx, auth_data, auth_data_len);
-    sha256_update(&ctx, client_data_hash, CTAP_CLIENT_DATA_HASH_SIZE);
+    sha256_update(&ctx, client_data_hash, CTAP_SHA256_HASH_SIZE);
     sha256_final(&ctx, hash);
 
     bn_null(priv_key);

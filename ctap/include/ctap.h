@@ -31,12 +31,10 @@ extern "C" {
 #endif
 
 /**
-* CTAP specification (version 20190130) section 6:
-* By default, authenticators MUST support messages of at least 1024 bytes
-*/
-
-/**
  * @brief CTAP max message size
+ * 
+ * CTAP specification (version 20190130) section 6:
+ * By default, authenticators MUST support messages of at least 1024 bytes
  */
 #define CTAP_MAX_MSG_SIZE                   0x400
 
@@ -466,6 +464,12 @@ struct __attribute__((packed)) ctap_resident_key
 {
     ctap_cred_desc_t cred_desc;
     uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
+    //todo: add atleast user_id
+    /*
+    assertion req: FIDO devices - device resident credentials: 
+    For device resident keys on FIDO devices, 
+    at least user "id" is mandatory.
+    */
     uint8_t priv_key[32];
 };
 
@@ -495,7 +499,7 @@ void ctap_init(void);
  * @param[in] sig               signature buffer
  * @param[in] sig_len           length of signature buffer
  * 
- * @return size of cbor encoded response data
+ * @return CTAP status code
  */
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
                             ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len);

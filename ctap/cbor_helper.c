@@ -387,7 +387,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 break;
             case CTAP_GA_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_get_assertion parse client_data_hash \n");
-                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_CLIENT_DATA_HASH_SIZE);
+                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_SHA256_HASH_SIZE);
                 parsed |= CTAP_GA_REQ_CLIENT_DATA_HASH;
                 break;
             case CTAP_GA_REQ_ALLOW_LIST:
@@ -468,7 +468,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
         {
             case CTAP_MC_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_make_credential parse clientDataHash \n");
-                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_CLIENT_DATA_HASH_SIZE);
+                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_SHA256_HASH_SIZE);
                 break;
             case CTAP_MC_REQ_RP:
                 DEBUG("CTAP_make_credential parse rp \n");

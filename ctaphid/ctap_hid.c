@@ -507,7 +507,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
     DEBUG("CTAPHID CBOR BYTES TO SENT: %u %u\n", size, resp.status);
 
-    if (resp.status == CTAP2_OK && size >= 0) {
+    if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */
         ctap_hid_write(cmd, cid, &resp, size + sizeof(resp.status));
     }
