@@ -32,7 +32,7 @@ extern "C" {
 
 /**
  * @name CTAP_HID packet type payload sizes
- * 
+ *
  * @{
  */
 #define CTAP_HID_INIT_PAYLOAD_SIZE  (CONFIG_USBUS_HID_INTERRUPT_EP_SIZE-7)   /**< endpoint size - init packet metadata */
@@ -46,7 +46,7 @@ extern "C" {
 
 /**
  * @name CTAP_HID packet type identifiers
- * 
+ *
  * @{
  */
 #define CTAP_HID_INIT_PACKET 0x80
@@ -54,19 +54,18 @@ extern "C" {
 /** @} */
 
 /* todo: both timeouts are arbitrary */
-#define CTAP_HID_TRANSACTION_TIMEOUT    (1 * US_PER_SEC) /* cont packet not sent in time */
-#define CTAP_HID_INACTIVITY_TIMEOUT     (1 * US_PER_SEC)
+#define CTAP_HID_TRANSACTION_TIMEOUT    (1 * US_PER_SEC) /**< cont packet not sent in time */
 
 /**
  * @brief CTAP_HID max message payload size
- * 
+ *
  * CTAP specification (version 20190130) section 8.2.4.
  */
 #define CTAP_HID_BUFFER_SIZE 7609
 
 /**
  * @name CTAP_HID commands
- * 
+ *
  * @{
  */
 #define CTAP_HID_COMMAND_PING       (0x01 | CTAP_HID_INIT_PACKET)
@@ -82,7 +81,7 @@ extern "C" {
 
 /**
  * @name CTAP_HID capability flags
- * 
+ *
  * @{
  */
 #define CTAP_HID_CAPABILITY_WINK 0x01   /**< If set, authenticator implements CTAPHID_WINK function */
@@ -92,7 +91,7 @@ extern "C" {
 
 /**
  * @name CTAP_HID error codes
- * 
+ *
  * @{
  */
 #define CTAP_HID_ERROR_INVALID_CMD      0x01    /**< The command in the request is invalid */
@@ -108,28 +107,28 @@ extern "C" {
 
 /**
  * @name CTAP_HID status codes
- * 
+ *
  * @{
  */
-#define CTAP_HID_STATUS_PROCESSING 0x01 
+#define CTAP_HID_STATUS_PROCESSING 0x01
 #define CTAP_HID_STATUS_UPNEEDED   0x02
 /** @} */
 
 /**
  * @brief CTAP_HID max number of channels
- * 
+ *
  */
 #define CTAP_HID_CIDS_MAX 0x08
 
 /**
  * @brief CTAP_HID broadcast channel identifier
- * 
+ *
  */
 #define CTAP_HID_BROADCAST_CID 0xffffffff
 
 /**
  * @name CTAP_HID buffer status
- * 
+ *
  * @{
  */
 #define CTAP_HID_BUFFER_STATUS_BUFFERING    0x00
@@ -139,7 +138,7 @@ extern "C" {
 
 /**
  * @brief CTAP_HID initialization packet struct
- * 
+ *
  */
 typedef struct
 {
@@ -151,7 +150,7 @@ typedef struct
 
 /**
  * @brief CTAP_HID continuation packet struct
- * 
+ *
  */
 typedef struct
 {
@@ -161,7 +160,7 @@ typedef struct
 
 /**
  * @brief CTAP_HID packet struct
- * 
+ *
  */
 typedef struct
 {
@@ -174,7 +173,7 @@ typedef struct
 
 /**
  * @brief CTAP_HID initialization response struct
- * 
+ *
  */
 typedef struct __attribute__((packed))
 {
@@ -189,7 +188,7 @@ typedef struct __attribute__((packed))
 
 /**
  * @brief CTAP_HID channel identifier struct
- * 
+ *
  */
 typedef struct
 {
@@ -200,7 +199,7 @@ typedef struct
 
 /**
  * @brief CTAP_HID buffer struct
- * 
+ *
  */
 typedef struct
 {
@@ -224,7 +223,7 @@ void ctap_hid_create(void);
  * @brief Handle CTAP_HID packet
  *
  * @param[in] pkt_raw   CTAP_HID packet
- * 
+ *
  */
 void ctap_hid_handle_packet(uint8_t *pkt_raw);
 
@@ -232,7 +231,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw);
  * @brief Send keepalive packet
  *
  * @param[in] status    CTAP_HID status code
- * 
+ *
  */
 void ctap_hid_send_keepalive(uint8_t status);
 

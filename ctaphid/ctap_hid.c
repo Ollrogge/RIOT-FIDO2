@@ -57,7 +57,7 @@ static char usb_stack[USBUS_STACKSIZE];
 
 static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
 
-void usb_hid_stdio_init(usbus_t* usbus, uint8_t* report_desc, size_t report_desc_size);
+void usb_hid_io_init(usbus_t* usbus, uint8_t* report_desc, size_t report_desc_size);
 ssize_t usb_hid_stdio_write(const void* buffer, size_t size);
 
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
@@ -80,7 +80,7 @@ static void reset_ctap_buffer(void);
 
 static void check_timeouts(void);
 
-int usb_hid_stdio_read_timeout(void* buffer, size_t size, uint32_t timeout);
+int usb_hid_io_read_timeout(void* buffer, size_t size, uint32_t timeout);
 
 static mutex_t is_busy_mutex;
 static uint8_t is_busy = 0;
@@ -110,10 +110,6 @@ static void check_timeouts(void)
             is_busy = 0;
             mutex_unlock(&is_busy_mutex);
         }
-        /* delete cid due to inactivity, todo: delete, and kick most inactive client when space needed */
-        else if (cids[i].taken && (now - cids[i].last_used) >= CTAP_HID_INACTIVITY_TIMEOUT) {
-            delete_cid(cids[i].cid);
-        }
     }
 }
 
@@ -127,6 +123,9 @@ static uint32_t get_new_cid(void)
 
 static int8_t add_cid(uint32_t cid)
 {
+    uint64_t oldest = xtimer_now_usec64();
+    int8_t index_oldest = -1;
+
     for (int i = 0; i < CTAP_HID_CIDS_MAX; i++) {
         if (!cids[i].taken) {
             cids[i].taken = 1;
@@ -135,7 +134,21 @@ static int8_t add_cid(uint32_t cid)
 
             return 0;
         }
+
+        if (cids[i].last_used < oldest) {
+            oldest = cids[i].last_used;
+            index_oldest = i;
+        }
     }
+
+     /* remove oldest cid to make place for a new one (LIFO) */
+    if (index_oldest > -1) {
+        cids[index_oldest].taken = 1;
+        cids[index_oldest].cid = cid;
+        cids[index_oldest].last_used = xtimer_now_usec64();
+        return 0;
+    }
+
     return -1;
 }
 
@@ -239,7 +252,7 @@ void ctap_hid_create(void)
     usbdev_t *usbdev = usbdev_get_ctx(0);
     assert(usbdev);
     usbus_init(&usbus, usbdev);
-    usb_hid_stdio_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
+    usb_hid_io_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
 
     DEBUG("Starting usbus thread \n");
     usbus_create(usb_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
@@ -337,7 +350,7 @@ static void* pkt_loop(void* arg)
     int read;
 
     while (1) {
-        read = usb_hid_stdio_read_timeout(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
+        read = usb_hid_io_read_timeout(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
 
         if (read == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
             ctap_hid_handle_packet(buffer);
@@ -538,9 +551,9 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
     resp.cid = cid_new;
     memmove(resp.nonce, nonce, 8);
     resp.protocol_version = CTAP_HID_PROTOCOL_VERSION;
-    resp.version_major = 0; 
-    resp.version_minor = 0; 
-    resp.build_version = 0; 
+    resp.version_major = 0;
+    resp.version_minor = 0;
+    resp.build_version = 0;
 
     uint8_t cmd = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
 
