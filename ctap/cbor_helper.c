@@ -13,9 +13,10 @@ static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t *pub_key);
 static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_desc);
+static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
 
-static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t len);
-static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t len);
+static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t *len);
+static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t *len);
 static uint8_t parse_text_string(CborValue *it, char* dst, size_t* len);
 
 static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type);
@@ -143,14 +144,17 @@ uint8_t cbor_helper_get_info(CborEncoder* encoder)
 }
 
 uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash, ctap_resident_key_t *rk)
+                                            uint8_t *client_data_hash, ctap_resident_key_t *rk,
+                                            uint8_t valid_cred_count)
 {
     int ret;
     CborEncoder map;
     uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
     size_t sig_buf_len;
 
-    ret = cbor_encoder_create_map(encoder, &map, 3);
+    uint8_t map_len = valid_cred_count > 1 ? 5 : 4;
+
+    ret = cbor_encoder_create_map(encoder, &map, map_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_int(&map, CTAP_GA_RESP_CREDENTIAL);
@@ -174,6 +178,20 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     ret = cbor_encode_byte_string(&map, sig_buf, sig_buf_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_int(&map, CTAP_GA_RESP_USER);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    ret = encode_user_entity(&map, rk);
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    if (valid_cred_count > 1) {
+        ret = cbor_encode_int(&map, CTAP_GA_RESP_NUMBER_OF_CREDENTIALS);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = cbor_encode_int(&map, valid_cred_count);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
 
     ret = cbor_encoder_close_container(encoder, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -291,6 +309,26 @@ static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_de
     return CTAP2_OK;
 }
 
+// todo pass user entity struct once unnecessary field are removed
+static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
+{
+    int ret;
+    CborEncoder map;
+
+    ret = cbor_encoder_create_map(encoder, &map, 1);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_text_string(&map, "id", 2);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    ret = cbor_encode_byte_string(&map, rk->user_id, rk->user_id_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encoder_close_container(encoder, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    return CTAP2_OK;
+}
+
 /* https://tools.ietf.org/html/rfc8152#page-34 Section 13.1.1 */
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key)
 {
@@ -345,6 +383,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
 {
     int ret;
     int key;
+    size_t len;
     uint8_t parsed = 0;
     CborParser parser;
     CborValue it;
@@ -382,17 +421,18 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
             case CTAP_GA_REQ_RP_ID:
                 DEBUG("CTAP_get_assertion parse rp_id \n");
                 req->rp_id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
-                ret = parse_text_string(&map, (char*)req->rp_id, &req->rp_id_len);
+                ret = parse_text_string(&map, (char*)req->rp_id, (size_t*)&req->rp_id_len);
                 parsed |= CTAP_GA_REQ_RP_ID;
                 break;
             case CTAP_GA_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_get_assertion parse client_data_hash \n");
-                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_SHA256_HASH_SIZE);
+                len = CTAP_SHA256_HASH_SIZE;
+                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
                 parsed |= CTAP_GA_REQ_CLIENT_DATA_HASH;
                 break;
             case CTAP_GA_REQ_ALLOW_LIST:
                 DEBUG("CTAP_get_assertion parse allow_list \n");
-                ret = parse_allow_list(&map, &req->allow_list, &req->allow_list_len);
+                ret = parse_allow_list(&map, &req->allow_list, (size_t*)&req->allow_list_len);
                 break;
             case CTAP_GA_REQ_EXTENSIONS:
                 DEBUG("CTAP_get_assertion parse extensions \n");
@@ -433,6 +473,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
 {
     int ret;
     int key;
+    size_t len;
     CborParser parser;
     CborValue it;
     CborValue map;
@@ -468,7 +509,8 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
         {
             case CTAP_MC_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_make_credential parse clientDataHash \n");
-                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, CTAP_SHA256_HASH_SIZE);
+                len = CTAP_SHA256_HASH_SIZE;
+                ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
                 break;
             case CTAP_MC_REQ_RP:
                 DEBUG("CTAP_make_credential parse rp \n");
@@ -558,7 +600,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
             /* parse text string will change rp->id_len to its actual size */
             rp->id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
 
-            ret = parse_text_string(&map, (char*)rp->id, &rp->id_len);
+            ret = parse_text_string(&map, (char*)rp->id, (size_t*)&rp->id_len);
             if (ret != CborNoError) {
                 return ret;
             }
@@ -635,7 +677,8 @@ static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
 
         /* todo: make sure we have id key, because it is not optional */
         if (strcmp(key, "id") == 0) {
-            ret = parse_byte_array(&map, user->id, CTAP_USER_ID_MAX_SIZE);
+            user->id_len = CTAP_USER_ID_MAX_SIZE;
+            ret = parse_byte_array(&map, user->id, (size_t*)&user->id_len);
             if (ret != CTAP2_OK) {
                 return ret;
             }
@@ -886,27 +929,26 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_t *cred)
     return CTAP2_OK;
 }
 
-static uint8_t parse_fixed_size_byte_array(CborValue *it, uint8_t* dst, size_t len)
+static uint8_t parse_fixed_size_byte_array(CborValue *it, uint8_t* dst, size_t* len)
 {
     int ret;
     int type;
-    size_t len2;
+    size_t temp_len = *len;
 
     type = cbor_value_get_type(it);
     if (type != CborByteStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
 
-    len2 = len;
-    ret = cbor_value_copy_byte_string(it, dst, &len2, NULL);
+    ret = cbor_value_copy_byte_string(it, dst, len, NULL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    if (len2 != len) {
+    if (temp_len != *len) {
         return CTAP1_ERR_INVALID_LENGTH;
     }
 
     return CTAP2_OK;
 }
 
-static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t len)
+static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t* len)
 {
     int type;
     int ret;
@@ -914,7 +956,7 @@ static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t len)
     type = cbor_value_get_type(it);
     if (type != CborByteStringType) return CTAP2_ERR_INVALID_CBOR_TYPE;
 
-    ret = cbor_value_copy_byte_string(it, dst, &len, NULL);
+    ret = cbor_value_copy_byte_string(it, dst, len, NULL);
     if (ret == CborErrorOutOfMemory) return CTAP2_ERR_LIMIT_EXCEEDED;
 
     return CTAP2_OK;

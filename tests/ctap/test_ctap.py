@@ -7,9 +7,9 @@ from getpass import getpass
 from binascii import a2b_hex
 from hashlib import sha256
 
-from fastecdsa.curve import P256
-from fastecdsa.encoding.der import DEREncoder
-from fastecdsa import keys, ecdsa
+#from fastecdsa.curve import P256
+#from fastecdsa.encoding.der import DEREncoder
+#from fastecdsa import keys, ecdsa
 
 import unittest
 

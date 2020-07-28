@@ -19,7 +19,7 @@
 #include "periph/flashpage.h"
 
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw);
-static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params_t *cred_params,
+static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
                               ctap_auth_data_t* auth_data, ctap_resident_key_t *rk);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw);
@@ -28,6 +28,7 @@ static void get_random_sequence(uint8_t *dst, size_t len);
 static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
 static void save_rk(ctap_resident_key_t *rk);
 static void load_rk(ctap_resident_key_t *rk);
+static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk);
 
 void ctap_init(void)
 {
@@ -50,9 +51,9 @@ static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter)
     counter++;
 
     /*
-        webauthn specification (version 20190304) section 6.1
-        sign counter is big endian
-        todo: check for endianess of system?
+    webauthn specification (version 20190304) section 6.1
+    sign counter is big endian
+    todo: check for endianess of system?
     */
     uint8_t *byte = (uint8_t*)auth_data_counter;
     *byte++ = (counter >> 24) & 0xff;
@@ -139,7 +140,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
             req.options.up, req.options.uv);
 
 
-    ret = make_auth_data_attest(&req.rp, &req.cred_params, &auth_data, &rk);
+    ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -160,6 +161,8 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw)
 {
     int ret;
+    bool valid_found = false;
+    uint8_t valid_count = 0;
     ctap_get_assertion_req_t req;
     ctap_resident_key_t rk;
     ctap_auth_data_header_t auth_data;
@@ -176,12 +179,18 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     for (size_t i = 0; i < req.allow_list_len; i++) {
         ret = parse_cred_desc(&req.allow_list, &cred_desc);
 
-        DEBUG("Cred desc: ");
-        print_hex(cred_desc.cred_id, sizeof(cred_desc.cred_id));
-
         if (ret != CTAP2_OK) {
             return ret;
         }
+
+        if (is_valid_credential(&cred_desc, &rk)) {
+            valid_found = true;
+            valid_count++;
+        }
+    }
+
+    if (!valid_found) {
+        return CTAP2_ERR_NO_CREDENTIALS;
     }
 
     ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data);
@@ -190,15 +199,26 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return ret;
     }
 
-    load_rk(&rk);
-
-    ret = cbor_helper_encode_assertion_object(encoder, &auth_data, req.client_data_hash, &rk);
+    ret = cbor_helper_encode_assertion_object(encoder, &auth_data, req.client_data_hash,
+                                              &rk, valid_count);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
     return CTAP2_OK;
+}
+
+static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk)
+{
+    // todo: implement proper handling of rk
+    memset(rk, 0, sizeof(ctap_resident_key_t));
+
+    load_rk(rk);
+
+    return  memcmp(cred_desc->cred_id, rk->cred_desc.cred_id,
+            sizeof(cred_desc->cred_id)) == 0;
+
 }
 
 static void load_rk(ctap_resident_key_t *rk)
@@ -241,14 +261,16 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth
     return CTAP2_OK;
 }
 
-static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params_t *cred_params,
+static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
                               ctap_auth_data_t* auth_data, ctap_resident_key_t *rk)
 {
     int ret;
+    uint32_t counter = 0;
 
     memset(auth_data, 0, sizeof(*auth_data));
-
-    ctap_auth_data_header_t* auth_header = &auth_data->header;
+    ctap_auth_data_header_t *auth_header = &auth_data->header;
+    ctap_attested_cred_data_t *cred_data = &auth_data->attested_cred_data;
+    ctap_attested_cred_data_header_t *cred_header = &cred_data->header;
 
     /* sha256 of relying party id */
     sha256(rp->id, rp->id_len, auth_header->rp_id_hash);
@@ -258,14 +280,9 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
     /* todo: faking user presence because it is necessary for registration */
     auth_header->flags |= CTAP_AUTH_DATA_FLAG_UP;
 
-    
     /* get sign counter */
-    uint32_t counter = 0;
     get_auth_data_sign_count(&counter);
     auth_header->counter = counter;
-
-    ctap_attested_cred_data_t * cred_data = &auth_data->attested_cred_data;
-    ctap_attested_cred_data_header_t* cred_header = &cred_data->header;
 
     /* device aaguid */
     uint8_t aaguid[] = {DEVICE_AAGUID};
@@ -301,9 +318,11 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_pub_key_cred_params
     cred_data->pub_key.params.cred_type = cred_params->cred_type;
 
     /* init resident key struct */
-    memmove(rk->rp_id_hash, auth_header->rp_id_hash, CTAP_SHA256_HASH_SIZE);
-    memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(cred_header->cred_id));
+    memmove(rk->rp_id_hash, auth_header->rp_id_hash, sizeof(rk->rp_id_hash));
+    memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(rk->cred_desc.cred_id));
+    memmove(rk->user_id, user->id, user->id_len);
     rk->cred_desc.cred_type = cred_params->cred_type;
+    rk->user_id_len = user->id_len;
 
     return CTAP2_OK;
 }

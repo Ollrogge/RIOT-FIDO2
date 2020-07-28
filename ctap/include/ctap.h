@@ -32,7 +32,7 @@ extern "C" {
 
 /**
  * @brief CTAP max message size
- * 
+ *
  * CTAP specification (version 20190130) section 6:
  * By default, authenticators MUST support messages of at least 1024 bytes
  */
@@ -148,7 +148,7 @@ extern "C" {
 
 /**
  * @name CTAP version strings
- * 
+ *
  * @{
  */
 #define CTAP_VERSION_STRING_FIDO_PRE "FIDO_2_1_PRE"
@@ -158,33 +158,33 @@ extern "C" {
 
 /**
  * @name CTAP get info response options map CBOR key values
- * 
+ *
  * All options are in the form key-value pairs with string IDs and boolean values
  * @{
  */
-#define CTAP_GET_INFO_RESP_OPTIONS_ID_PLAT       "plat"         
-#define CTAP_GET_INFO_RESP_OPTIONS_ID_RK         "rk"          
-#define CTAP_GET_INFO_RESP_OPTIONS_ID_CLIENT_PIN "clientPin"    
-#define CTAP_GET_INFO_RESP_OPTIONS_ID_UP         "up"          
-#define CTAP_GET_INFO_RESP_OPTIONS_ID_UV         "uv"          
+#define CTAP_GET_INFO_RESP_OPTIONS_ID_PLAT       "plat"
+#define CTAP_GET_INFO_RESP_OPTIONS_ID_RK         "rk"
+#define CTAP_GET_INFO_RESP_OPTIONS_ID_CLIENT_PIN "clientPin"
+#define CTAP_GET_INFO_RESP_OPTIONS_ID_UP         "up"
+#define CTAP_GET_INFO_RESP_OPTIONS_ID_UV         "uv"
 /** @} */
 
 /**
  * @name CTAP get info response CBOR key values
- * 
+ *
  * @{
  */
-#define CTAP_GET_INFO_RESP_VERSIONS         0x01    
-#define CTAP_GET_INFO_RESP_EXTENSIONS       0x02   
-#define CTAP_GET_INFO_RESP_AAGUID           0x03    
-#define CTAP_GET_INFO_RESP_OPTIONS          0x04    
-#define CTAP_GET_INFO_RESP_MAX_MSG_SIZE     0x05   
-#define CTAP_GET_INFO_RESP_PIN_PROTOCOLS    0x06   
+#define CTAP_GET_INFO_RESP_VERSIONS         0x01
+#define CTAP_GET_INFO_RESP_EXTENSIONS       0x02
+#define CTAP_GET_INFO_RESP_AAGUID           0x03
+#define CTAP_GET_INFO_RESP_OPTIONS          0x04
+#define CTAP_GET_INFO_RESP_MAX_MSG_SIZE     0x05
+#define CTAP_GET_INFO_RESP_PIN_PROTOCOLS    0x06
 /** @} */
 
 /**
  * @name CTAP make credential request CBOR key values
- * 
+ *
  * @{
  */
 #define CTAP_MC_REQ_CLIENT_DATA_HASH    0x01
@@ -200,7 +200,7 @@ extern "C" {
 
 /**
  * @name CTAP make credential response CBOR key values
- * 
+ *
  * @{
  */
 #define CTAP_MC_RESP_FMT                0x01
@@ -210,7 +210,7 @@ extern "C" {
 
 /**
  * @name CTAP get assertion request CBOR key values
- * 
+ *
  * @{
  */
 #define CTAP_GA_REQ_RP_ID               0x01
@@ -224,7 +224,7 @@ extern "C" {
 
 /**
  * @name CTAP get assertion response CBOR key values
- * 
+ *
  * @{
  */
 #define CTAP_GA_RESP_CREDENTIAL             0x01
@@ -245,7 +245,7 @@ extern "C" {
 
 /**
  * @name CTAP credential types
- * 
+ *
  * @{
  */
 #define CTAP_PUB_KEY_CRED_PUB_KEY 0x01
@@ -254,7 +254,7 @@ extern "C" {
 
 /**
  * @name CTAP COSE key CBOR map key values
- * 
+ *
  * @{
  */
 #define CTAP_COSE_KEY_LABEL_KTY      1
@@ -278,7 +278,7 @@ extern "C" {
 
 /**
  * @brief max size of ES256 signature
- * 
+ *
  * https://stackoverflow.com/questions/17269238/ecdsa-signature-length
  */
 #define CTAP_ES256_DER_MAX_SIZE 72
@@ -305,7 +305,7 @@ typedef struct ctap_resident_key ctap_resident_key_t;
 
 /**
  * @brief CTAP public key credential parameter
- * 
+ *
  */
 typedef struct __attribute__((packed))
 {
@@ -315,12 +315,13 @@ typedef struct __attribute__((packed))
 
 /**
  * @brief CTAP user entity struct
- * 
+ *
  * todo: remove name, display_name and icon as they are not needed when no screen and they take up stack memory
  */
 typedef struct
 {
     uint8_t id[CTAP_USER_ID_MAX_SIZE];                  /**< RP-specific user account id */
+    uint8_t id_len;                                     /**< actual length of user id */
     uint8_t name[CTAP_USER_MAX_NAME_SIZE + 1];          /**< user name */
     uint8_t display_name[CTAP_USER_MAX_NAME_SIZE + 1];  /**< user display name */
     uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1];        /**< URL referencing user icon image */
@@ -328,7 +329,7 @@ typedef struct
 
 /**
  * @brief CTAP response struct
- * 
+ *
  */
 struct ctap_resp
 {
@@ -338,7 +339,7 @@ struct ctap_resp
 
 /**
  * @brief CTAP credential description struct
- * 
+ *
  * webauthn specification (version 20190304) section 5.8.3
  */
 typedef struct
@@ -349,7 +350,7 @@ typedef struct
 
 /**
  * @brief CTAP options struct
- * 
+ *
  */
 typedef struct
 {
@@ -360,20 +361,20 @@ typedef struct
 
 /**
  * @brief CTAP relying party entity struct
- * 
+ *
  * todo: remove name and icon as they are not needed when no screen and they take up stack memory
  */
 typedef struct
 {
     uint8_t id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];          /**< relying party identifier */
-    size_t id_len;                                      /**< actual length of relying party identifier */
+    uint8_t id_len;                                      /**< actual length of relying party identifier */
     uint8_t name[CTAP_RP_MAX_NAME_SIZE + 1];            /**< human friendly relying party name */
     uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1];        /**< URL referencing relying party icon image */
 } ctap_rp_ent_t;
 
 /**
  * @brief CTAP make credential request struct
- * 
+ *
  */
 typedef struct
 {
@@ -388,21 +389,21 @@ typedef struct
 
 /**
  * @brief CTAP get assertion request struct
- * 
+ *
  */
 typedef struct
 {
     uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];       /**< Relying Party Identifier */
-    size_t rp_id_len;                                   /**< Actual Length of Relying Party Identifier */
+    uint8_t rp_id_len;                                  /**< Actual Length of Relying Party Identifier */
     uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE];    /**< SHA-256 hash of JSON serialized client data */
     ctap_options_t options;                             /**< parameters to influence authenticator operation */
     CborValue allow_list;                               /**< cbor array holding allow list */
-    size_t allow_list_len;                              /**< length of CBOR allow list array */
+    uint8_t allow_list_len;                             /**< length of CBOR allow list array */
 } ctap_get_assertion_req_t;
 
 /**
  * @brief CTAP P256 curve public key struct
- * 
+ *
  */
 typedef struct
 {
@@ -413,7 +414,7 @@ typedef struct
 
 /**
  * @brief CTAP attested credential data header struct
- * 
+ *
  * defined for easier serialization
  */
 typedef struct __attribute__((packed))
@@ -426,7 +427,7 @@ typedef struct __attribute__((packed))
 
 /**
  * @brief CTAP attested credential data struct
- * 
+ *
  */
 typedef struct
 {
@@ -436,7 +437,7 @@ typedef struct
 
 /**
  * @brief CTAP authenticator data header struct
- * 
+ *
  * defined for easier serialization
  */
 typedef struct __attribute__((packed))
@@ -457,19 +458,15 @@ typedef struct
 
 /**
  * @brief CTAP resident key struct
- * 
+ *
  *  https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source
  */
 struct __attribute__((packed)) ctap_resident_key
 {
     ctap_cred_desc_t cred_desc;
     uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
-    //todo: add atleast user_id
-    /*
-    assertion req: FIDO devices - device resident credentials: 
-    For device resident keys on FIDO devices, 
-    at least user "id" is mandatory.
-    */
+    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
+    uint8_t user_id_len;
     uint8_t priv_key[32];
 };
 
@@ -479,7 +476,7 @@ struct __attribute__((packed)) ctap_resident_key
  * @param[in] req   request
  * @param[in] size  size of request in bytes
  * @param[in] resp  response struct
- * 
+ *
  * @return size of cbor encoded response data
  */
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
@@ -498,7 +495,7 @@ void ctap_init(void);
  * @param[in] rk                resident key used to sign the data
  * @param[in] sig               signature buffer
  * @param[in] sig_len           length of signature buffer
- * 
+ *
  * @return CTAP status code
  */
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
