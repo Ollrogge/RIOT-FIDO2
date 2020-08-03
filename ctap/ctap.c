@@ -18,11 +18,13 @@
 
 #include "periph/flashpage.h"
 
-static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw);
+static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
+                                bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
                               ctap_auth_data_t* auth_data, ctap_resident_key_t *rk);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data);
-static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw);
+static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
+                             bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static void get_random_sequence(uint8_t *dst, size_t len);
 static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
@@ -73,7 +75,8 @@ static void print_hex(uint8_t* data, size_t size)
     DEBUG("\n");
 }
 
-size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
+size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
+                           bool *should_cancel, mutex_t *should_cancel_mutex)
 {
     DEBUG("ctap handle request %u \n ", size);
 
@@ -97,14 +100,16 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
             break;
         case CTAP_MAKE_CREDENTIAL:
             DEBUG("CTAP MAKE CREDENTIAL \n");
-            resp->status = make_credential(&encoder, size, req);
+            resp->status = make_credential(&encoder, size, req,
+                                           should_cancel, should_cancel_mutex);
             DEBUG("make cred resp: ");
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_ASSERTION:
             DEBUG("CTAP GET_ASSERTION \n");
-            resp->status = get_assertion(&encoder, size, req);
+            resp->status = get_assertion(&encoder, size, req, should_cancel,
+                                         should_cancel_mutex);
             DEBUG("get assertion resp: ");
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
@@ -121,7 +126,8 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp)
 }
 
 /* CTAP specification (version 20190130) section 5.1 */
-static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw)
+static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
+                              bool *should_cancel, mutex_t *should_cancel_mutex)
 {
     int ret;
     ctap_make_credential_req_t req;
@@ -139,6 +145,17 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     DEBUG("Make credential options: %d %d %d \n", req.options.rk,
             req.options.up, req.options.uv);
 
+
+    /* last moment where transaction can be cancelled */
+    mutex_lock(should_cancel_mutex);
+    if (*should_cancel) {
+        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+    mutex_unlock(should_cancel_mutex);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk);
 
@@ -158,7 +175,8 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 }
 
 /* CTAP specification (version 20190130) section 5.2 */
-static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw)
+static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
+                             bool *should_cancel, mutex_t *should_cancel_mutex)
 {
     int ret;
     bool valid_found = false;
@@ -191,6 +209,17 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 
     if (!valid_found) {
         return CTAP2_ERR_NO_CREDENTIALS;
+    }
+
+    /* last moment where transaction can be cancelled */
+    mutex_lock(should_cancel_mutex);
+    if (*should_cancel) {
+        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+    mutex_unlock(should_cancel_mutex);
+
+    if (ret != CTAP2_OK) {
+        return ret;
     }
 
     ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data);

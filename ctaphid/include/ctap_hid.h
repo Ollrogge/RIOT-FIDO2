@@ -23,8 +23,10 @@
 #define CTAP_HID_H
 
 #include <stdint.h>
-#include "usb/usbus/hid.h"
+#include "mutex.h"
 #include "timex.h"
+
+#include "usb/usbus/hid.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -210,7 +212,9 @@ typedef struct
     int16_t seq;
     uint16_t bcnt;
     uint8_t err;
-    uint8_t locked;
+    bool is_locked;
+    bool should_cancel;
+    mutex_t should_cancel_mutex;
 } ctap_hid_buffer_t;
 
 /**

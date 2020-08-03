@@ -24,6 +24,8 @@
 
 #include <stdint.h>
 
+#include "mutex.h"
+
 #include "cbor.h"
 
 #ifdef __cplusplus
@@ -479,7 +481,8 @@ struct __attribute__((packed)) ctap_resident_key
  *
  * @return size of cbor encoded response data
  */
-size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp);
+size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
+                           bool *should_cancel, mutex_t *should_cancel_mutex);
 
 /**
  * @brief Initialize crypto library
@@ -506,4 +509,3 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
 }
 #endif
 #endif
-
