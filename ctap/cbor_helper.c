@@ -11,6 +11,7 @@ static uint8_t parse_pub_key_cred_param(CborValue *it, uint8_t* cred_type, int32
 static uint8_t parse_allow_list(CborValue *it, CborValue *allow_list, size_t *allow_list_len);
 static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len);
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
+static uint8_t parse_cose_key(CborValue *it, ctap_cose_key_t *cose_key);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t *pub_key);
 static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_desc);
 static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
@@ -18,6 +19,7 @@ static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
 static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t *len);
 static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t *len);
 static uint8_t parse_text_string(CborValue *it, char* dst, size_t* len);
+static uint8_t parse_int(CborValue *it, int *num);
 
 static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type);
 
@@ -384,12 +386,13 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
     int ret;
     int key;
     size_t len;
-    uint8_t parsed = 0;
     CborParser parser;
     CborValue it;
     CborType type;
     CborValue map;
     size_t map_len;
+
+    uint8_t required_parsed = 0;
 
     DEBUG("Get assertion req cbor: ");
     print_cbor_hex(req_raw, size);
@@ -422,13 +425,13 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 DEBUG("CTAP_get_assertion parse rp_id \n");
                 req->rp_id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
                 ret = parse_text_string(&map, (char*)req->rp_id, (size_t*)&req->rp_id_len);
-                parsed |= CTAP_GA_REQ_RP_ID;
+                required_parsed++;
                 break;
             case CTAP_GA_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_get_assertion parse client_data_hash \n");
                 len = CTAP_SHA256_HASH_SIZE;
                 ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
-                parsed |= CTAP_GA_REQ_CLIENT_DATA_HASH;
+                required_parsed++;
                 break;
             case CTAP_GA_REQ_ALLOW_LIST:
                 DEBUG("CTAP_get_assertion parse allow_list \n");
@@ -460,9 +463,95 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     }
 
-     /* rp_id and client_data_hash are mandatory */
-    if (!((parsed & (CTAP_GA_REQ_RP_ID | CTAP_GA_REQ_CLIENT_DATA_HASH)) ==
-        (CTAP_GA_REQ_RP_ID | CTAP_GA_REQ_CLIENT_DATA_HASH))) {
+     /* rp_id and client_data_hash are required */
+    if (required_parsed != 2) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
+    return CTAP2_OK;
+}
+
+uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size,
+                                         uint8_t *req_raw)
+{
+    int ret;
+    int key;
+    int type;
+    int temp;
+    CborParser parser;
+    CborValue it;
+    CborValue map;
+    size_t map_len;
+    size_t len;
+
+    uint8_t required_parsed = 0;
+
+    DEBUG("client_pin_req cbor: ");
+    print_cbor_hex(req_raw, size);
+
+    ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    type = cbor_value_get_type(&it);
+    if (type != CborMapType) return CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
+
+    ret = cbor_value_enter_container(&it, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_value_get_map_length(&it, &map_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    for (size_t i = 0; i < map_len; i++) {
+        type = cbor_value_get_type(&map);
+        if (type != CborIntegerType) return CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
+
+        ret = cbor_value_get_int_checked(&map, &key);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        switch (key) {
+            case CTAP_CP_REQ_PIN_PROTOCOL:
+                ret = parse_int(&map, &temp);
+                req->pin_protocol = (uint8_t)temp;
+                required_parsed++;
+                break;
+            case CTAP_CP_REQ_SUB_COMMAND:
+                ret = parse_int(&map, &temp);
+                req->sub_command = (uint8_t)temp;
+                required_parsed++;
+                break;
+            case CTAP_CP_REQ_KEY_AGREEMENT:
+                ret = parse_cose_key(&map, &req->key_agreement);
+                req->key_agreement_present = true;
+                break;
+            case CTAP_CP_REQ_PIN_AUTH:
+                len = sizeof(req->pin_auth);
+                ret = parse_fixed_size_byte_array(&map, req->pin_auth, &len);
+                req->pin_auth_present = true;
+                break;
+            case CTAP_CP_REQ_NEW_PIN_ENC:
+                ret = parse_text_string(&map, (char*)req->new_pin_enc, &len);
+                req->new_pin_enc_size = len;
+                break;
+            case CTAP_CP_REQ_PIN_HASH_ENC:
+                len = sizeof(req->pin_hash_enc);
+                ret = parse_fixed_size_byte_array(&map, req->pin_hash_enc, &len);
+                break;
+            default:
+                DEBUG("parse_client_pin unknown key: %d \n", key);
+                break;
+        }
+         if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    if (required_parsed != 2) {
         return CTAP2_ERR_MISSING_PARAMETER;
     }
 
@@ -479,6 +568,8 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
     CborValue map;
     size_t map_len;
     CborType type;
+
+    uint8_t required_parsed = 0;
 
     DEBUG("Make credential req cbor: ");
     print_cbor_hex(req_raw, size);
@@ -511,18 +602,22 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 DEBUG("CTAP_make_credential parse clientDataHash \n");
                 len = CTAP_SHA256_HASH_SIZE;
                 ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
+                required_parsed++;
                 break;
             case CTAP_MC_REQ_RP:
                 DEBUG("CTAP_make_credential parse rp \n");
                 ret = parse_rp(&map, &req->rp);
+                required_parsed++;
                 break;
             case CTAP_MC_REQ_USER:
                 DEBUG("CTAP_make_credential parse user \n");
                 ret = parse_user(&map, &req->user);
+                required_parsed++;
                 break;
             case CTAP_MC_REQ_PUB_KEY_CRED_PARAMS:
                 DEBUG("CTAP_make_credential parse key_cred params \n");
                 ret = parse_pub_key_cred_params(&map, &req->cred_params);
+                required_parsed++;
                 break;
             case CTAP_MC_REQ_EXCLUDE_LIST:
                 DEBUG("CTAP_make_credential parse excludeList \n");
@@ -550,8 +645,87 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
             return ret;
         }
 
+        if (required_parsed != 4) {
+            return CTAP2_ERR_MISSING_PARAMETER;
+        }
+
         ret = cbor_value_advance(&map);
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    return CTAP2_OK;
+}
+
+static uint8_t parse_cose_key(CborValue *it, ctap_cose_key_t *cose_key)
+{
+    int ret;
+    int type;
+    int key;
+    int temp;
+    CborValue map;
+    size_t map_len;
+    size_t len;
+
+    uint8_t required_parsed = 0;
+
+    type = cbor_value_get_type(it);
+    if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+    ret = cbor_value_enter_container(it,&map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_value_get_map_length(it, &map_len);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    for (size_t i = 0; i < map_len; i++) {
+
+        ret = parse_int(&map, &key);
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+        switch(key) {
+            case CTAP_COSE_KEY_LABEL_KTY:
+                ret = parse_int(&map, &cose_key->kty);
+                required_parsed++;
+                break;
+            case CTAP_COSE_KEY_LABEL_ALG:
+                ret = parse_int(&map, &temp);
+                cose_key->alg_type = (int32_t)temp;
+                required_parsed++;
+                break;
+            case CTAP_COSE_KEY_LABEL_CRV:
+                ret = parse_int(&map, &cose_key->crv);
+                required_parsed++;
+                break;
+            case CTAP_COSE_KEY_LABEL_X:
+                len = sizeof(cose_key->pubkey.x);
+                ret = parse_fixed_size_byte_array(&map, cose_key->pubkey.x, &len);
+                required_parsed++;
+                break;
+            case CTAP_COSE_KEY_LABEL_Y:
+                len = sizeof(cose_key->pubkey.y);
+                ret = parse_fixed_size_byte_array(&map, cose_key->pubkey.y, &len);
+                required_parsed++;
+                break;
+            default:
+                DEBUG("Parse cose key unknown key: %d \n", key);
+        }
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        ret = cbor_value_advance(&map);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    if (required_parsed != 5) {
+        return CTAP2_ERR_MISSING_PARAMETER;
     }
 
     return CTAP2_OK;
@@ -568,7 +742,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
     size_t key_len;
     size_t len;
 
-    uint8_t id_parsed = 0;
+    uint8_t required_parsed = 0;
 
     type = cbor_value_get_type(it);
     if (type != CborMapType) return CTAP2_ERR_INVALID_CBOR_TYPE;
@@ -606,7 +780,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
             }
 
             rp->id[CTAP_DOMAIN_NAME_MAX_SIZE] = 0;
-            id_parsed = 1;
+            required_parsed++;
         }
         else if (strcmp(key, "name") == 0) {
             len = CTAP_RP_MAX_NAME_SIZE;
@@ -632,8 +806,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     }
 
-    /* rp id is mandatory */
-    if (!id_parsed) {
+    if (required_parsed != 1) {
         return CTAP2_ERR_MISSING_PARAMETER;
     }
 
@@ -929,7 +1102,7 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_t *cred)
     return CTAP2_OK;
 }
 
-static uint8_t parse_fixed_size_byte_array(CborValue *it, uint8_t* dst, size_t* len)
+static uint8_t parse_fixed_size_byte_array(CborValue *it, uint8_t *dst, size_t* len)
 {
     int ret;
     int type;
@@ -974,6 +1147,20 @@ static uint8_t parse_text_string(CborValue *it, char* dst, size_t* len)
     if (ret == CborErrorOutOfMemory) return CTAP2_ERR_LIMIT_EXCEEDED;
 
     dst[*len] = 0;
+
+    return CTAP2_OK;
+}
+
+static uint8_t parse_int(CborValue *it, int *num)
+{
+    int type;
+    int ret;
+
+    type = cbor_value_get_type(it);
+    if (type != CborIntegerType) return CTAP2_ERR_INVALID_CBOR_TYPE;
+
+    ret = cbor_value_get_int_checked(it, num);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     return CTAP2_OK;
 }

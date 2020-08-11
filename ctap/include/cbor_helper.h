@@ -62,6 +62,19 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
 uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size,
                                               uint8_t *req_raw);
 
+
+/**
+ * @brief Parse raw ClientPIN request into struct
+ *
+ * @param[in] req       struct to parse into
+ * @param[in] size      size of raw request
+ * @param[in] req_raw   raw request
+ *
+ * @return CTAP status code
+ */
+uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size,
+                                         uint8_t *req_raw);
+
 /**
  * @brief Encode attestation object
  *

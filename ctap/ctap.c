@@ -20,11 +20,15 @@
 
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
-static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
+static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
+                                     ctap_pub_key_cred_params_t *cred_params,
                               ctap_auth_data_t* auth_data, ctap_resident_key_t *rk);
-static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data);
+static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
+                                    ctap_auth_data_header_t *auth_data);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                              bool *should_cancel, mutex_t *should_cancel_mutex);
+static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
+                          bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static void get_random_sequence(uint8_t *dst, size_t len);
 static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
@@ -116,6 +120,12 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             break;
         case CTAP_GET_NEXT_ASSERTION:
             DEBUG("CTAP GET NEXT ASSERTION \n");
+            break;
+        case CTAP_CLIENT_PIN:
+            DEBUG("CTAP CLIENT PIN \n");
+            resp->status = client_pin(&encoder, size,req, should_cancel,
+                                      should_cancel_mutex);
+            return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         default:
             DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
@@ -230,6 +240,27 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 
     ret = cbor_helper_encode_assertion_object(encoder, &auth_data, req.client_data_hash,
                                               &rk, valid_count);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    return CTAP2_OK;
+}
+
+/* CTAP specification (version 20190130) section 5.5 */
+static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
+                          bool *should_cancel, mutex_t *should_cancel_mutex)
+{
+    int ret;
+    ctap_client_pin_req_t req;
+    (void)encoder;
+    (void)should_cancel;
+    (void)should_cancel_mutex;
+
+    memset(&req, 0, sizeof(req));
+
+    ret = cbor_helper_parse_client_pin_req(&req, size, req_raw);
 
     if (ret != CTAP2_OK) {
         return ret;

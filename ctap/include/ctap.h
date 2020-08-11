@@ -237,6 +237,19 @@ extern "C" {
 /** @} */
 
 /**
+ * @name CTAP Client PIN CBOR key values
+ *
+ * @{
+ */
+#define CTAP_CP_REQ_PIN_PROTOCOL    0x01
+#define CTAP_CP_REQ_SUB_COMMAND     0x02
+#define CTAP_CP_REQ_KEY_AGREEMENT   0x03
+#define CTAP_CP_REQ_PIN_AUTH        0x04
+#define CTAP_CP_REQ_NEW_PIN_ENC     0x05
+#define CTAP_CP_REQ_PIN_HASH_ENC    0x06
+/** @} */
+
+/**
  * 128 bit identifier indentifying type of authenticator
  * Todo: how to set this based on being in a generic OS ?
  *
@@ -471,6 +484,42 @@ struct __attribute__((packed)) ctap_resident_key
     uint8_t user_id_len;
     uint8_t priv_key[32];
 };
+
+/**
+ * @brief CTAP cose key struct
+ *
+ * https://www.iana.org/assignments/cose/cose.xhtml
+ */
+typedef struct
+{
+    struct{
+        uint8_t x[32];
+        uint8_t y[32];
+    } pubkey;
+
+    int kty;             /**< identification of key type */
+    int crv;             /**< EC identifier */
+    int32_t alg_type;    /**< COSEAlgorithmIdentifier */
+} ctap_cose_key_t;
+
+
+/**
+ * @brief CTAP client pin request struct
+ *
+ */
+typedef struct
+{
+    uint8_t pin_protocol; /**< PIN protocol version chosen by the client */
+    uint8_t sub_command; /**< authenticator Client PIN sub command */
+    ctap_cose_key_t key_agreement; /**< public key of platform_key_agreement_key*/
+    bool key_agreement_present;
+    uint8_t pin_auth[16]; /**< first 16 bytes of HMAC-SHA-256 of encrypted contents  */
+    bool pin_auth_present;
+    uint8_t new_pin_enc[256]; /**< Encrypted new PIN using sharedSecret. */
+    uint16_t new_pin_enc_size;
+    uint8_t pin_hash_enc[16]; /**< Encrypted first 16 bytes of SHA-256 of PIN using sharedSecret. */
+    bool pin_hash_enc_present;
+} ctap_client_pin_req_t;
 
 /**
  * @brief Handle CBOR encoded ctap request.
