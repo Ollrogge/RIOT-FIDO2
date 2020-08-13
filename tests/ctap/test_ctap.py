@@ -1,5 +1,5 @@
 from fido2.hid import CtapHidDevice, CAPABILITY
-from fido2.ctap2 import CTAP2, AttestationObject, AttestedCredentialData
+from fido2.ctap2 import CTAP2, PinProtocolV1, AttestationObject, AttestedCredentialData
 from fido2.attestation import Attestation
 from fido2.client import Fido2Client
 from fido2.server import Fido2Server
@@ -23,8 +23,8 @@ def get_device():
     return devs[0]
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
-class TestInfo(unittest.TestCase):
-    #@unittest.skip
+class TestCtap(unittest.TestCase):
+    @unittest.skip
     def test_info(self):
         print()
         print("*** test_info ***")
@@ -43,7 +43,7 @@ class TestInfo(unittest.TestCase):
 
             self.assertEqual(info.versions, ['FIDO_2_0'])
             self.assertEqual(info.aaguid, a2b_hex("9c295865fa2c36b705a42320af9c8f16"))
-                                                  
+
             self.assertEqual(info.options, {
                 'rk': True,
                 'up': True,
@@ -54,8 +54,23 @@ class TestInfo(unittest.TestCase):
             print("Device does not support CBOR")
 
         dev.close()
-    
-    #@unittest.skip
+
+    def test_pin(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        if dev.capabilities & CAPABILITY.CBOR:
+            ctap = CTAP2(dev)
+            pin1 = PinProtocolV1(ctap)
+
+            resp = pin1.set_pin('12345')
+        else:
+            print("Device does not support CBOR")
+
+    @unittest.skip
     def test_make_credential_and_get_assertion2(self):
         print()
         print("*** test_make_credential_and_get_assertion ***")
@@ -85,7 +100,7 @@ class TestInfo(unittest.TestCase):
 
         # Prepare parameters for makeCredential
         create_options, state = server.register_begin(user, user_verification=uv)
-        
+
         attestation_object, client_data = client.make_credential(
             create_options["publicKey"], pin=pin)
 

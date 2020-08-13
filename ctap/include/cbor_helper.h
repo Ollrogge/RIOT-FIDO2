@@ -104,10 +104,20 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
                                             uint8_t valid_cred_count);
 
 /**
+ * @brief Encode key agreement
+ *
+ * @param[in] encoder           CBOR encoder
+ * @param[in] key               ECDH pub key
+ *
+ * @return CTAP status code
+ */
+uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t *key);
+
+/**
  * @brief Parse credential description
  *
  * @param[in] arr   CBOR array
- * @param[in] cred   struct to parse into
+ * @param[in] cred  struct to parse into
  *
  * @return CTAP status code
  */

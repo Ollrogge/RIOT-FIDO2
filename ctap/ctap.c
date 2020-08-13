@@ -12,11 +12,11 @@
 
 #include "xtimer.h"
 
-#include "relic.h"
-
 #include "hashes/sha256.h"
 
 #include "periph/flashpage.h"
+
+#include "relic.h"
 
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
@@ -30,18 +30,34 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
+static uint8_t key_agreement(CborEncoder *encoder);
 static void get_random_sequence(uint8_t *dst, size_t len);
 static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
 static void save_rk(ctap_resident_key_t *rk);
 static void load_rk(ctap_resident_key_t *rk);
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk);
 
+typedef struct
+{
+    ec_t pub;
+    bn_t priv;
+} ctap_key_agreement_key_t;
+
+ctap_key_agreement_key_t ag_key;
+
 void ctap_init(void)
 {
+    int ret;
      /* init relic */
     core_init();
     rand_init();
     ep_param_set(NIST_P256);
+
+    /* get key pair for ECHD key exchange */
+    ret = cp_ecdh_gen(ag_key.priv, ag_key.pub);
+    if (ret == 1) {
+        DEBUG("ECDH key pair creation failed. Not good :( \n");
+    }
 }
 
 static void get_random_sequence(uint8_t *dst, size_t len)
@@ -263,10 +279,47 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
     ret = cbor_helper_parse_client_pin_req(&req, size, req_raw);
 
     if (ret != CTAP2_OK) {
+        DEBUG("Error parsing client_pin request: %d \n", ret);
         return ret;
     }
 
-    return CTAP2_OK;
+    DEBUG("client_pin subcommand: %u \n", req.sub_command);
+
+    if (req.pin_protocol != 1 || req.sub_command == 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    switch (req.sub_command) {
+        case CTAP_CP_REQ_SUB_COMMAND_GET_RETRIES:
+            break;
+        case CTAP_CP_REQ_SUB_COMMAND_GET_KEY_AGREEMENT:
+            ret = key_agreement(encoder);
+            break;
+        case CTAP_CP_REQ_SUB_COMMAND_SET_PIN:
+            break;
+        case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
+            break;
+        case CTAP_CP_REQ_SUB_COMMAND_GET_PIN_TOKEN:
+            break;
+        default:
+            DEBUG("Clientpin subcommand unknown command: %u \n", req.sub_command);
+    }
+
+    DEBUG("Client_pin resp: %d \n", ret);
+    return ret;
+}
+
+static uint8_t key_agreement(CborEncoder *encoder)
+{
+    ctap_public_key_t key;
+
+    fp_write_bin(key.x, sizeof(key.x), ag_key.pub->x);
+    fp_write_bin(key.y, sizeof(key.y), ag_key.pub->y);
+
+    key.params.alg_type = CTAP_COSE_ALG_ECDH_ES_HKDF_256;
+    key.params.cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
+
+    return cbor_helper_encode_key_agreement(encoder, &key);
 }
 
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk)
@@ -326,6 +379,10 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
 {
     int ret;
     uint32_t counter = 0;
+    ec_t pub_key;
+    bn_t priv_key;
+     /* device aaguid */
+    uint8_t aaguid[] = {DEVICE_AAGUID};
 
     memset(auth_data, 0, sizeof(*auth_data));
     ctap_auth_data_header_t *auth_header = &auth_data->header;
@@ -344,8 +401,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
     get_auth_data_sign_count(&counter);
     auth_header->counter = counter;
 
-    /* device aaguid */
-    uint8_t aaguid[] = {DEVICE_AAGUID};
     memmove(cred_header->aaguid, &aaguid, sizeof(cred_header->aaguid));
 
     /* generate credential id */
@@ -353,16 +408,13 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
     cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
     cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 
-    /* generate key pair */
-    ec_t pub_key;
-    bn_t priv_key;
-
     ec_null(pub_key);
     bn_null(priv_key);
 
     ec_new(pub_key);
     bn_new(priv_key);
 
+     /* generate key pair */
     ret = cp_ecdsa_gen(priv_key, pub_key);
     //todo: update package version to get up to date macro name
     if (ret == 1) {

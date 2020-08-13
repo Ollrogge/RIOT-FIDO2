@@ -237,7 +237,7 @@ extern "C" {
 /** @} */
 
 /**
- * @name CTAP Client PIN CBOR key values
+ * @name CTAP Client PIN request CBOR key values
  *
  * @{
  */
@@ -247,6 +247,28 @@ extern "C" {
 #define CTAP_CP_REQ_PIN_AUTH        0x04
 #define CTAP_CP_REQ_NEW_PIN_ENC     0x05
 #define CTAP_CP_REQ_PIN_HASH_ENC    0x06
+/** @} */
+
+/**
+ * @name CTAP Client PIN request subcommand CBOR key values
+ *
+ * @{
+ */
+#define CTAP_CP_REQ_SUB_COMMAND_GET_RETRIES         0x01
+#define CTAP_CP_REQ_SUB_COMMAND_GET_KEY_AGREEMENT   0x02
+#define CTAP_CP_REQ_SUB_COMMAND_SET_PIN             0x03
+#define CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN          0x04
+#define CTAP_CP_REQ_SUB_COMMAND_GET_PIN_TOKEN       0x05
+/** @} */
+
+/**
+ * @name CTAP Client PIN resp CBOR key values
+ *
+ * @{
+ */
+#define CTAP_CP_RESP_KEY_AGREEMENT  0x01
+#define CTAP_CP_RESP_PIN_TOKEN      0x02
+#define CTAP_CP_RESP_RETRIES        0x03
 /** @} */
 
 /**
@@ -285,6 +307,12 @@ extern "C" {
  * @brief CTAP COSE Algorithms registry identifier for ES256
  */
 #define CTAP_COSE_ALG_ES256           -7
+
+/**
+ * @brief CTAP COSE Algorithms registry identifier for ECDH ES HKDF 256
+ * (Elliptic Curve Diffie Hellman ephemeral static + HMAC-SHA256 Key Derivation function)
+ */
+#define CTAP_COSE_ALG_ECDH_ES_HKDF_256 -25
 
 /**
  * @brief length of a SHA256 hash
