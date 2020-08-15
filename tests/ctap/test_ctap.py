@@ -66,7 +66,7 @@ class TestCtap(unittest.TestCase):
             ctap = CTAP2(dev)
             pin1 = PinProtocolV1(ctap)
 
-            resp = pin1.set_pin('12345')
+            resp = pin1.set_pin("1234")
         else:
             print("Device does not support CBOR")
 

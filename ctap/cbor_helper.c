@@ -671,12 +671,12 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
             return ret;
         }
 
-        if (required_parsed != 4) {
-            return CTAP2_ERR_MISSING_PARAMETER;
-        }
-
         ret = cbor_value_advance(&map);
         if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
+    if (required_parsed != 4) {
+        return CTAP2_ERR_MISSING_PARAMETER;
     }
 
     return CTAP2_OK;

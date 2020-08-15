@@ -149,6 +149,16 @@ extern "C" {
 #define CTAP_DOMAIN_NAME_MAX_SIZE 253
 
 /**
+ * @brief PIN min size
+ */
+#define CTAP_PIN_MIN_SIZE   4
+
+/**
+ * @brief PIN max size
+ */
+#define CTAP_PIN_MAX_SIZE   64
+
+/**
  * @name CTAP version strings
  *
  * @{
@@ -520,7 +530,7 @@ struct __attribute__((packed)) ctap_resident_key
  */
 typedef struct
 {
-    struct{
+    struct {
         uint8_t x[32];
         uint8_t y[32];
     } pubkey;
@@ -529,7 +539,6 @@ typedef struct
     int crv;             /**< EC identifier */
     int32_t alg_type;    /**< COSEAlgorithmIdentifier */
 } ctap_cose_key_t;
-
 
 /**
  * @brief CTAP client pin request struct

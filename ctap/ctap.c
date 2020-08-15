@@ -18,6 +18,8 @@
 
 #include "relic.h"
 
+#include "rijndael-api-fst.h"
+
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
@@ -29,13 +31,22 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
                              bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
+static uint8_t set_pin(ctap_client_pin_req_t *req);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static uint8_t key_agreement(CborEncoder *encoder);
 static void get_random_sequence(uint8_t *dst, size_t len);
-static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
+static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
 static void save_rk(ctap_resident_key_t *rk);
 static void load_rk(ctap_resident_key_t *rk);
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk);
+static void get_shared_key(uint8_t *secret, size_t len, ctap_cose_key_t *cose);
+int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
+		int in_len, uint8_t *key, int key_len, uint8_t *iv);
+
+/* temporary defines of most recent relic lib */
+#define ERR_NO_BUFFER 7
+#define RLC_ERR       1
+#define RLC_OK        0
 
 typedef struct
 {
@@ -53,9 +64,15 @@ void ctap_init(void)
     rand_init();
     ep_param_set(NIST_P256);
 
+    bn_null(ag_key.priv);
+    ec_null(ag_key.pub);
+
+    bn_new(ag_key.priv);
+    ec_new(ag_key.pub);
+
     /* get key pair for ECHD key exchange */
     ret = cp_ecdh_gen(ag_key.priv, ag_key.pub);
-    if (ret == 1) {
+    if (ret == STS_ERR) {
         DEBUG("ECDH key pair creation failed. Not good :( \n");
     }
 }
@@ -296,6 +313,7 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
             ret = key_agreement(encoder);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_SET_PIN:
+            set_pin(&req);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
             break;
@@ -307,6 +325,120 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
 
     DEBUG("Client_pin resp: %d \n", ret);
     return ret;
+}
+
+static void get_shared_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
+{
+    /* translate pub_key into relic internal structure */
+    uint8_t *x = cose->pubkey.x;
+    uint8_t *y = cose->pubkey.y;
+    uint8_t sz = sizeof(cose->pubkey.x);
+    uint8_t temp[sz * 2 + 1];
+    uint8_t temp2[len];
+    ec_t pub;
+    ec_t sec;
+
+    ec_null(sec);
+    ec_null(pub);
+
+    ec_new(sec);
+    ec_new(pub);
+
+     /* point is not compressed */
+    temp[0] = 0x04;
+    memcpy(temp + 1, x, sz);
+    memcpy(temp + 1 + sz, y, sz);
+
+    ep_read_bin(pub, temp, sizeof(temp));
+
+    /* multiply local private key with remote public key to obtain shared secret */
+    ec_mul(sec, pub, ag_key.priv);
+
+    fp_write_bin(temp2, len, sec->x);
+
+    /* sha256 of shared secret to obtain shared key */
+    sha256(temp2, len, key);
+
+    ec_free(sec);
+    ec_free(pub);
+}
+
+/* needed because enc pin is not padded but relic's default func expects it to be */
+int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
+		int in_len, uint8_t *key, int key_len, uint8_t *iv) {
+
+	keyInstance key_inst;
+	cipherInstance cipher_inst;
+
+	if (*out_len < in_len) {
+		return STS_ERR;
+	}
+
+	if (makeKey2(&key_inst, DIR_DECRYPT, key_len, (char *)key) != TRUE) {
+		return STS_ERR;
+	}
+	if (cipherInit(&cipher_inst, MODE_CBC, NULL) != TRUE) {
+		return STS_ERR;
+	}
+
+    /* min 1 block */
+    if (in_len < 128) {
+        in_len = 128;
+    }
+
+	memcpy(cipher_inst.IV, iv, BC_LEN);
+	*out_len = blockDecrypt(&cipher_inst, &key_inst, in, in_len, out);
+
+	if (*out_len <= 0) {
+		return STS_ERR;
+	}
+	return STS_OK;
+}
+
+//todo: could combine set_pin and update_pin into 1 function if it is worth it.
+static uint8_t set_pin(ctap_client_pin_req_t *req)
+{
+    uint8_t shared_key[MD_LEN];
+    uint8_t hmac[32];
+    uint8_t new_pin_dec[256];
+    int new_pin_dec_len = sizeof(new_pin_dec);
+    uint8_t iv[BC_LEN] = {0};
+    int ret;
+    //todo: check if pin is already set, error if it is.
+
+    if (req->new_pin_enc_size < 64) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    if (!req->new_pin_enc_size || !req->pin_auth_present ||
+        !req->key_agreement_present) {
+            return CTAP2_ERR_NOT_ALLOWED;
+    }
+
+    get_shared_key(shared_key, sizeof(shared_key), &req->key_agreement);
+
+    hmac_sha256(shared_key, sizeof(shared_key), req->new_pin_enc,
+                req->new_pin_enc_size, hmac);
+
+    if (memcmp(hmac, req->pin_auth, 16) != 0) {
+        DEBUG("Err: Set pin hmac and pin_auth differ \n");
+        return CTAP2_ERR_PIN_AUTH_INVALID;
+    }
+
+    ret = aes_dec(new_pin_dec, &new_pin_dec_len, req->new_pin_enc,
+                         req->new_pin_enc_size, shared_key, sizeof(shared_key) * 8, iv);
+
+
+    if (ret == STS_ERR) {
+        DEBUG("set pin: error while decrypting PIN \n");
+        return CTAP1_ERR_OTHER;
+    }
+
+    DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
+
+    ec_free(pub_key);
+
+    return CTAP2_OK;
 }
 
 static uint8_t key_agreement(CborEncoder *encoder)
@@ -417,8 +549,8 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
      /* generate key pair */
     ret = cp_ecdsa_gen(priv_key, pub_key);
     //todo: update package version to get up to date macro name
-    if (ret == 1) {
-        return CTAP2_ERR_PROCESSING;
+    if (ret == STS_ERR) {
+        return CTAP1_ERR_OTHER;
     }
 
     fp_write_bin(cred_data->pub_key.x, sizeof(cred_data->pub_key.x), pub_key->x);
@@ -435,6 +567,9 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
     memmove(rk->user_id, user->id, user->id_len);
     rk->cred_desc.cred_type = cred_params->cred_type;
     rk->user_id_len = user->id_len;
+
+    ec_free(pub_key);
+    bn_free(priv_key);
 
     return CTAP2_OK;
 }
@@ -469,21 +604,30 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
     and where both r and s are both big-endian-encoded values that are left-padded to the maximum length
     */
     bn_read_bin(priv_key, rk->priv_key, sizeof(rk->priv_key));
+
     ret = cp_ecdsa_sig(r, s, hash, sizeof(hash), 1, priv_key);
 
     //todo: update package version to get up to date macro name
-    if (ret == 1) {
-        return CTAP2_ERR_PROCESSING;
+    if (ret == STS_ERR) {
+        return CTAP1_ERR_OTHER;
     }
 
-    sig_to_der_format(r, s, sig, sig_len);
+    ret = sig_to_der_format(r, s, sig, sig_len);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    bn_free(priv_key);
+    bn_free(r);
+    bn_free(s);
 
     return CTAP2_OK;
 }
 
 /* Encoding signature in ASN.1 DER format */
 /* https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/TechGuidelines/TR03111/BSI-TR-03111_V-2-0_pdf.pdf?__blob=publicationFile&v=2 */
-static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
+static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
 {
     uint8_t offset = 0;
 
@@ -555,4 +699,6 @@ static void sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len)
     offset += 32 - lead_s;
 
     *sig_len = offset;
+
+    return CTAP2_OK;
 }
