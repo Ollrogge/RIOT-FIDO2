@@ -330,6 +330,11 @@ uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t
     return ret;
 }
 
+uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_t size)
+{
+    int ret;
+}
+
 // todo pass user entity struct once unnecessary field are removed
 static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
 {
@@ -448,7 +453,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 break;
             case CTAP_GA_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_get_assertion parse client_data_hash \n");
-                len = CTAP_SHA256_HASH_SIZE;
+                len = SHA256_DIGEST_LENGTH;
                 ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
                 required_parsed++;
                 break;
@@ -626,7 +631,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
         {
             case CTAP_MC_REQ_CLIENT_DATA_HASH:
                 DEBUG("CTAP_make_credential parse clientDataHash \n");
-                len = CTAP_SHA256_HASH_SIZE;
+                len = SHA256_DIGEST_LENGTH;
                 ret = parse_fixed_size_byte_array(&map, req->client_data_hash, &len);
                 required_parsed++;
                 break;

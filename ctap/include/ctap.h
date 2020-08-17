@@ -28,6 +28,8 @@
 
 #include "cbor.h"
 
+#include "hashes/sha256.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -157,6 +159,21 @@ extern "C" {
  * @brief PIN max size
  */
 #define CTAP_PIN_MAX_SIZE   64
+
+/**
+ * @brief PIN salt size
+ */
+#define CTAP_PIN_SALT_SIZE 32
+
+/**
+ * @brief max consecutive incorrect PIN attempts
+ */
+#define CTAP_PIN_MAX_ATTEMPTS 8
+
+/**
+ * @brief Size of pin token
+ */
+#define CTAP_PIN_TOKEN_SIZE 16
 
 /**
  * @name CTAP version strings
@@ -325,11 +342,6 @@ extern "C" {
 #define CTAP_COSE_ALG_ECDH_ES_HKDF_256 -25
 
 /**
- * @brief length of a SHA256 hash
- */
-#define CTAP_SHA256_HASH_SIZE 32
-
-/**
  * @brief max size of ES256 signature
  *
  * https://stackoverflow.com/questions/17269238/ecdsa-signature-length
@@ -345,6 +357,11 @@ extern "C" {
  * @brief CTAP size of authenticator AAGUID
  */
 #define CTAP_AAGUID_SIZE 16
+
+/**
+ * @brief CTAP state initialized marker
+ */
+#define CTAP_INITIALIZED_MARKER 0x4e
 
 /**
  * @brief CTAP resp struct forward declaration
@@ -431,7 +448,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE];    /**< SHA-256 hash of JSON serialized client data */
+    uint8_t client_data_hash[SHA256_DIGEST_LENGTH];     /**< SHA-256 hash of JSON serialized client data */
     ctap_rp_ent_t rp;                                   /**< relying party */
     ctap_user_ent_t user;                               /**< user */
     ctap_pub_key_cred_params_t cred_params;             /**< public key credential parameters */
@@ -448,7 +465,7 @@ typedef struct
 {
     uint8_t rp_id[CTAP_DOMAIN_NAME_MAX_SIZE + 1];       /**< Relying Party Identifier */
     uint8_t rp_id_len;                                  /**< Actual Length of Relying Party Identifier */
-    uint8_t client_data_hash[CTAP_SHA256_HASH_SIZE];    /**< SHA-256 hash of JSON serialized client data */
+    uint8_t client_data_hash[SHA256_DIGEST_LENGTH];     /**< SHA-256 hash of JSON serialized client data */
     ctap_options_t options;                             /**< parameters to influence authenticator operation */
     CborValue allow_list;                               /**< cbor array holding allow list */
     uint8_t allow_list_len;                             /**< length of CBOR allow list array */
@@ -495,7 +512,7 @@ typedef struct
  */
 typedef struct __attribute__((packed))
 {
-    uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     uint8_t flags;
     uint32_t counter;
 } ctap_auth_data_header_t;
@@ -517,7 +534,7 @@ typedef struct
 struct __attribute__((packed)) ctap_resident_key
 {
     ctap_cred_desc_t cred_desc;
-    uint8_t rp_id_hash[CTAP_SHA256_HASH_SIZE];
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
     uint8_t user_id_len;
     uint8_t priv_key[32];
@@ -559,6 +576,19 @@ typedef struct
 } ctap_client_pin_req_t;
 
 /**
+ * @brief General state of CTAP stored in flash memory
+ *
+ */
+typedef struct
+{
+    uint8_t initialized;    /**< CTAP is initialized or not */
+    bool pin_is_set;            /**< PIN is set or not */
+    uint8_t remaining_pin_attempts; /**< remaining PIN tries */
+    uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
+    uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
+} ctap_state_t;
+
+/**
  * @brief Handle CBOR encoded ctap request.
  *
  * @param[in] req   request
@@ -571,7 +601,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                            bool *should_cancel, mutex_t *should_cancel_mutex);
 
 /**
- * @brief Initialize crypto library
+ * @brief Initialize ctap and load state
  */
 void ctap_init(void);
 

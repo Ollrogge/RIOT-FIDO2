@@ -4,6 +4,8 @@
 
 #include <string.h>
 
+#include "fmt.h"
+
 #include "ctap.h"
 
 #include "ctap_hid.h"
@@ -11,8 +13,6 @@
 #include "cbor_helper.h"
 
 #include "xtimer.h"
-
-#include "hashes/sha256.h"
 
 #include "periph/flashpage.h"
 
@@ -32,55 +32,114 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t set_pin(ctap_client_pin_req_t *req);
+static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static uint8_t key_agreement(CborEncoder *encoder);
-static void get_random_sequence(uint8_t *dst, size_t len);
+static void generate_random_sequence(uint8_t *dst, size_t len);
 static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t* buf, size_t *sig_len);
 static void save_rk(ctap_resident_key_t *rk);
 static void load_rk(ctap_resident_key_t *rk);
+static uint8_t save_pin(uint8_t *pin, size_t len);
+static void save_state(ctap_state_t *state);
+static void load_state(ctap_state_t *state);
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk);
 static void get_shared_key(uint8_t *secret, size_t len, ctap_cose_key_t *cose);
+static bool pin_is_set(void);
+static uint8_t get_remaining_pin_attempts(void);
+static void decrement_pin_attempts(void);
+static void reset_pin_attempts(void);
+static int reset_key_agreement(void);
 int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len, uint8_t *iv);
-
-/* temporary defines of most recent relic lib */
-#define ERR_NO_BUFFER 7
-#define RLC_ERR       1
-#define RLC_OK        0
-
+/* typedef here because including relic.h in ctap.h results in errors */
 typedef struct
 {
     ec_t pub;
     bn_t priv;
 } ctap_key_agreement_key_t;
 
-ctap_key_agreement_key_t ag_key;
+static ctap_key_agreement_key_t g_ag_key;
+static ctap_state_t g_state;
+static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
 
 void ctap_init(void)
 {
     int ret;
+
+    load_state(&g_state);
+
+    if (g_state.initialized != CTAP_INITIALIZED_MARKER) {
+        g_state.initialized = CTAP_INITIALIZED_MARKER;
+        g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
+        g_state.pin_is_set = false;
+        generate_random_sequence(g_state.pin_salt, sizeof(g_state.pin_salt));
+
+        save_state(&g_state);
+    }
+
      /* init relic */
     core_init();
     rand_init();
     ep_param_set(NIST_P256);
 
-    bn_null(ag_key.priv);
-    ec_null(ag_key.pub);
+    /**
+     * configuration operations upon power up
+     * CTAP specification (version 20190130) section 5.5.2
+     */
+    bn_null(g_ag_key.priv);
+    ec_null(g_ag_key.pub);
 
-    bn_new(ag_key.priv);
-    ec_new(ag_key.pub);
+    bn_new(g_ag_key.priv);
+    ec_new(g_ag_key.pub);
 
     /* get key pair for ECHD key exchange */
-    ret = cp_ecdh_gen(ag_key.priv, ag_key.pub);
+    ret = cp_ecdh_gen(g_ag_key.priv, g_ag_key.pub);
     if (ret == STS_ERR) {
         DEBUG("ECDH key pair creation failed. Not good :( \n");
     }
+
+    /* initialize pin_token */
+    generate_random_sequence(g_pin_token, sizeof(g_pin_token));
 }
 
-static void get_random_sequence(uint8_t *dst, size_t len)
+static int reset_key_agreement(void)
+{
+    bn_free(g_ag_key.priv);
+    ec_free(g_ag_key.pub);
+
+    bn_null(g_ag_key.priv);
+    ec_null(g_ag_key.pub);
+
+    bn_new(g_ag_key.priv);
+    ec_new(g_ag_key.pub);
+
+    return cp_ecdh_gen(g_ag_key.priv, g_ag_key.pub);
+}
+
+static void generate_random_sequence(uint8_t *dst, size_t len)
 {
     /* relic random bytes func */
     rand_bytes(dst, len);
+}
+
+static bool pin_is_set(void)
+{
+    return g_state.pin_is_set;
+}
+
+static void decrement_pin_attempts(void)
+{
+    g_state.remaining_pin_attempts--;
+}
+
+static uint8_t get_remaining_pin_attempts(void)
+{
+    return g_state.remaining_pin_attempts;
+}
+
+static void reset_pin_attempts(void)
+{
+    g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
 }
 
 /* webauthn specification (version 20190304) section 6.1.1 */
@@ -287,7 +346,6 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
 {
     int ret;
     ctap_client_pin_req_t req;
-    (void)encoder;
     (void)should_cancel;
     (void)should_cancel_mutex;
 
@@ -313,7 +371,7 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
             ret = key_agreement(encoder);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_SET_PIN:
-            set_pin(&req);
+            ret = set_pin(&req);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
             break;
@@ -352,7 +410,7 @@ static void get_shared_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
     ep_read_bin(pub, temp, sizeof(temp));
 
     /* multiply local private key with remote public key to obtain shared secret */
-    ec_mul(sec, pub, ag_key.priv);
+    ec_mul(sec, pub, g_ag_key.priv);
 
     fp_write_bin(temp2, len, sec->x);
 
@@ -365,7 +423,8 @@ static void get_shared_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
 
 /* needed because enc pin is not padded but relic's default func expects it to be */
 int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
-		int in_len, uint8_t *key, int key_len, uint8_t *iv) {
+		int in_len, uint8_t *key, int key_len, uint8_t *iv)
+{
 
 	keyInstance key_inst;
 	cipherInstance cipher_inst;
@@ -400,11 +459,15 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
 {
     uint8_t shared_key[MD_LEN];
     uint8_t hmac[32];
-    uint8_t new_pin_dec[256];
+    uint8_t new_pin_dec[CTAP_PIN_MAX_SIZE];
     int new_pin_dec_len = sizeof(new_pin_dec);
     uint8_t iv[BC_LEN] = {0};
     int ret;
     //todo: check if pin is already set, error if it is.
+
+    if (pin_is_set()) {
+        return CTAP2_ERR_NOT_ALLOWED;
+    }
 
     if (req->new_pin_enc_size < 64) {
         return CTAP1_ERR_OTHER;
@@ -436,7 +499,26 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
 
     DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
 
-    ec_free(pub_key);
+    new_pin_dec_len = fmt_strnlen((char*)new_pin_dec, CTAP_PIN_MAX_SIZE);
+    if (new_pin_dec_len < CTAP_PIN_MIN_SIZE) {
+        return CTAP2_ERR_PIN_POLICY_VIOLATION;
+    }
+
+    ret = save_pin(new_pin_dec, (size_t)new_pin_dec_len);
+
+    return CTAP2_OK;
+}
+
+static uint8_t save_pin(uint8_t *pin, size_t len)
+{
+    sha256_context_t ctx;
+
+    sha256_init(&ctx),
+    sha256_update(&ctx, pin, len);
+    sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
+    sha256_final(&ctx, g_state.pin_hash);
+
+    save_state(&g_state);
 
     return CTAP2_OK;
 }
@@ -445,13 +527,72 @@ static uint8_t key_agreement(CborEncoder *encoder)
 {
     ctap_public_key_t key;
 
-    fp_write_bin(key.x, sizeof(key.x), ag_key.pub->x);
-    fp_write_bin(key.y, sizeof(key.y), ag_key.pub->y);
+    fp_write_bin(key.x, sizeof(key.x), g_ag_key.pub->x);
+    fp_write_bin(key.y, sizeof(key.y), g_ag_key.pub->y);
 
     key.params.alg_type = CTAP_COSE_ALG_ECDH_ES_HKDF_256;
     key.params.cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
 
     return cbor_helper_encode_key_agreement(encoder, &key);
+}
+
+static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
+{
+    uint8_t shared_key[MD_LEN];
+    sha256_context_t ctx;
+    uint8_t pin_hash_dec[SHA256_DIGEST_LENGTH];
+    uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
+    uint8_t iv[BC_LEN] = {0};
+    uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE];
+    int ret;
+
+    if (!pin_is_set()) {
+        return CTAP2_ERR_PIN_NOT_SET;
+    }
+
+    if (!req->key_agreement_present || !req->pin_hash_enc_present) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
+    if (get_remaining_pin_attempts() == 0) {
+        return CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    get_shared_key(shared_key, sizeof(shared_key), &req->key_agreement);
+
+    ret = aes_dec(pin_hash_dec, sizeof(pin_hash_dec, req->pin_hash_enc,
+            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key), iv);
+
+    if (ret == STS_ERR) {
+        DEBUG("set pin: error while pin hash \n");
+        return CTAP1_ERR_OTHER;
+    }
+
+    sha256_init(&ctx),
+    sha256_update(&ctx, pin_hash_dec, sizeof(pin_hash_dec));
+    sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
+    sha256_final(&ctx, pin_hash_dec_final);
+
+    if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
+        DEBUG("get_pin_token: invalid pin \n");
+        reset_key_agreement();
+        decrement_pin_attempts();
+        save_state(&g_state);
+
+        return CTAP2_ERR_PIN_INVALID;
+    }
+
+    reset_pin_attempts();
+
+    ret = bc_aes_cbc_enc(pin_token_enc, sizeof(pin_token_enc), g_pin_token,
+                   sizeof(g_pin_token), shared_key, sizeof(shared_key), iv);
+
+    if (ret == STS_ERR) {
+        DEBUG("get pin token: error encrypting pin token \n");
+        return CTAP1_ERR_OTHER;
+    }
+
+    return cbor_helper_encode_pin_token(encoder, pin_token_enc, sizeof(pin_token_enc));
 }
 
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk)
@@ -466,6 +607,19 @@ static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_ke
 
 }
 
+/* todo: properly handle all kind of flash memory access */
+static void save_rk(ctap_resident_key_t *rk)
+{
+    int ret;
+    uint8_t page[FLASHPAGE_SIZE];
+
+    memmove(page, rk, sizeof(*rk));
+
+    ret = flashpage_write_and_verify(20, page);
+
+    (void)ret;
+}
+
 static void load_rk(ctap_resident_key_t *rk)
 {
     uint8_t page[FLASHPAGE_SIZE];
@@ -475,17 +629,31 @@ static void load_rk(ctap_resident_key_t *rk)
     memmove(rk, page, sizeof(*rk));
 }
 
-static void save_rk(ctap_resident_key_t *rk)
+static void save_state(ctap_state_t * state)
 {
-    //todo: save struct in first page with info where in flash keys are
     int ret;
     uint8_t page[FLASHPAGE_SIZE];
 
-    memmove(page, rk, sizeof(*rk));
+    memmove(page, state, sizeof(*state));
 
-    ret = flashpage_write_and_verify(20, page);
+    ret = flashpage_write_and_verify(19, page);
 
     (void)ret;
+}
+
+/**
+ * todo: implement memory corruption detection by checking a (backup?) value
+ * somewhere else in flash. If this value exists but state->is_intialized
+ * does not equal the initialization marker, memory is probably corrupted.
+ * (because backup value will only exist if has been initialized)
+ */
+static void load_state(ctap_state_t *state)
+{
+    uint8_t page[FLASHPAGE_SIZE];
+
+    flashpage_read(19, page);
+
+    memmove(state, page, sizeof(*state));
 }
 
 static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data)
@@ -536,7 +704,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
     memmove(cred_header->aaguid, &aaguid, sizeof(cred_header->aaguid));
 
     /* generate credential id */
-    get_random_sequence(cred_header->cred_id, sizeof(cred_header->cred_id));
+    generate_random_sequence(cred_header->cred_id, sizeof(cred_header->cred_id));
     cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
     cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 
@@ -584,11 +752,11 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
     bn_t r, s;
     int ret;
     sha256_context_t ctx;
-    uint8_t hash[CTAP_SHA256_HASH_SIZE];
+    uint8_t hash[SHA256_DIGEST_LENGTH];
 
     sha256_init(&ctx);
     sha256_update(&ctx, auth_data, auth_data_len);
-    sha256_update(&ctx, client_data_hash, CTAP_SHA256_HASH_SIZE);
+    sha256_update(&ctx, client_data_hash, SHA256_DIGEST_LENGTH);
     sha256_final(&ctx, hash);
 
     bn_null(priv_key);

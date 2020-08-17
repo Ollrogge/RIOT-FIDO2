@@ -114,6 +114,17 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
 uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t *key);
 
 /**
+ * @brief Encode encrypted pin token
+ *
+ * @param[in] encoder           CBOR encoder
+ * @param[in] token             encrypted pin token
+ * @param[in] size              size of encrypted pin token
+ *
+ * @return CTAP status code
+ */
+uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_t size);
+
+/**
  * @brief Parse credential description
  *
  * @param[in] arr   CBOR array
