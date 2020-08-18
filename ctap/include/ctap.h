@@ -176,6 +176,11 @@ extern "C" {
 #define CTAP_PIN_TOKEN_SIZE 16
 
 /**
+ * @brief Size of cryptographic keys used
+ */
+#define CTAP_KEY_LEN 32
+
+/**
  * @name CTAP version strings
  *
  * @{
