@@ -333,6 +333,21 @@ uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t
 uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_t size)
 {
     int ret;
+    CborEncoder map;
+
+    ret = cbor_encoder_create_map(encoder, &map, 1);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_int(&map, CTAP_CP_RESP_PIN_TOKEN);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_byte_string(&map, token, size);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encoder_close_container(encoder, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    return ret;
 }
 
 // todo pass user entity struct once unnecessary field are removed
@@ -568,6 +583,7 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
             case CTAP_CP_REQ_PIN_HASH_ENC:
                 len = sizeof(req->pin_hash_enc);
                 ret = parse_fixed_size_byte_array(&map, req->pin_hash_enc, &len);
+                req->pin_hash_enc_present = true;
                 DEBUG("HASH_ENC %d \n", ret);
                 break;
             default:

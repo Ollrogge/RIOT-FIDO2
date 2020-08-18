@@ -20,6 +20,8 @@
 
 #include "rijndael-api-fst.h"
 
+#define CTAP_TESTING 1
+
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
@@ -48,6 +50,7 @@ static bool pin_is_set(void);
 static uint8_t get_remaining_pin_attempts(void);
 static void decrement_pin_attempts(void);
 static void reset_pin_attempts(void);
+static void reset(void);
 static int reset_key_agreement(void);
 int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len, uint8_t *iv);
@@ -100,6 +103,16 @@ void ctap_init(void)
 
     /* initialize pin_token */
     generate_random_sequence(g_pin_token, sizeof(g_pin_token));
+}
+
+static void reset(void)
+{
+    g_state.initialized = CTAP_INITIALIZED_MARKER;
+    g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
+    g_state.pin_is_set = false;
+    generate_random_sequence(g_state.pin_salt, sizeof(g_state.pin_salt));
+
+    save_state(&g_state);
 }
 
 static int reset_key_agreement(void)
@@ -219,6 +232,12 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                                       should_cancel_mutex);
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
+#ifdef CTAP_TESTING
+        case CTAP_RESET:
+            DEBUG("CTAP RESET \n");
+            reset();
+            break;
+#endif
         default:
             DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
             break;
@@ -376,6 +395,7 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
         case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
             break;
         case CTAP_CP_REQ_SUB_COMMAND_GET_PIN_TOKEN:
+            ret = get_pin_token(encoder, &req);
             break;
         default:
             DEBUG("Clientpin subcommand unknown command: %u \n", req.sub_command);
@@ -414,7 +434,7 @@ static void get_shared_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
 
     fp_write_bin(temp2, len, sec->x);
 
-    /* sha256 of shared secret to obtain shared key */
+    /* sha256 of shared secret x point to obtain shared key */
     sha256(temp2, len, key);
 
     ec_free(sec);
@@ -436,6 +456,7 @@ int aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 	if (makeKey2(&key_inst, DIR_DECRYPT, key_len, (char *)key) != TRUE) {
 		return STS_ERR;
 	}
+
 	if (cipherInit(&cipher_inst, MODE_CBC, NULL) != TRUE) {
 		return STS_ERR;
 	}
@@ -511,12 +532,17 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
 
 static uint8_t save_pin(uint8_t *pin, size_t len)
 {
+    uint8_t temp_hash[SHA256_DIGEST_LENGTH];
     sha256_context_t ctx;
 
+    sha256(pin, len, temp_hash);
+
     sha256_init(&ctx),
-    sha256_update(&ctx, pin, len);
+    sha256_update(&ctx, temp_hash, 16);
     sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
     sha256_final(&ctx, g_state.pin_hash);
+
+    g_state.pin_is_set = true;
 
     save_state(&g_state);
 
@@ -540,10 +566,13 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
 {
     uint8_t shared_key[MD_LEN];
     sha256_context_t ctx;
-    uint8_t pin_hash_dec[SHA256_DIGEST_LENGTH];
+    uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
+    int len;
     uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
     uint8_t iv[BC_LEN] = {0};
-    uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE];
+
+    /* +16 = padding that relic expects */
+    uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE + 16];
     int ret;
 
     if (!pin_is_set()) {
@@ -560,16 +589,17 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
 
     get_shared_key(shared_key, sizeof(shared_key), &req->key_agreement);
 
-    ret = aes_dec(pin_hash_dec, sizeof(pin_hash_dec, req->pin_hash_enc,
-            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key), iv);
+    len = sizeof(pin_hash_dec);
+    ret = aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
+            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key) * 8, iv);
 
     if (ret == STS_ERR) {
-        DEBUG("set pin: error while pin hash \n");
+        DEBUG("set pin: error while decrypting pin hash \n");
         return CTAP1_ERR_OTHER;
     }
 
     sha256_init(&ctx),
-    sha256_update(&ctx, pin_hash_dec, sizeof(pin_hash_dec));
+    sha256_update(&ctx, pin_hash_dec, 16);
     sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
     sha256_final(&ctx, pin_hash_dec_final);
 
@@ -584,15 +614,16 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
 
     reset_pin_attempts();
 
-    ret = bc_aes_cbc_enc(pin_token_enc, sizeof(pin_token_enc), g_pin_token,
-                   sizeof(g_pin_token), shared_key, sizeof(shared_key), iv);
+    len = sizeof(pin_token_enc);
+    ret = bc_aes_cbc_enc(pin_token_enc, &len, g_pin_token,
+                   sizeof(g_pin_token), shared_key, sizeof(shared_key) * 8, iv);
 
     if (ret == STS_ERR) {
         DEBUG("get pin token: error encrypting pin token \n");
         return CTAP1_ERR_OTHER;
     }
 
-    return cbor_helper_encode_pin_token(encoder, pin_token_enc, sizeof(pin_token_enc));
+    return cbor_helper_encode_pin_token(encoder, pin_token_enc, sizeof(pin_token_enc) - 16);
 }
 
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk)
