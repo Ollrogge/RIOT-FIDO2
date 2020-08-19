@@ -55,6 +55,7 @@ class TestCtap(unittest.TestCase):
 
         dev.close()
 
+    #@unittest.skip
     def test_pin(self):
         try:
             dev = get_device()
@@ -66,15 +67,18 @@ class TestCtap(unittest.TestCase):
             ctap = CTAP2(dev)
             pin1 = PinProtocolV1(ctap)
             PIN = "12345"
+            PIN2 = "54321"
 
             # reset state so we can set pin without error
             ctap.reset()
 
-            resp = pin1.set_pin(PIN)
-            print(f"Set pin resp: {resp}")
+            pin1.set_pin(PIN)
 
             resp = pin1.get_pin_token(PIN)
             print(f"Get pin token resp: {resp}")
+
+            pin1.change_pin(PIN, PIN2)
+
         else:
             print("Device does not support CBOR")
 

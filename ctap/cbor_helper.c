@@ -553,38 +553,32 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
         switch (key) {
             case CTAP_CP_REQ_PIN_PROTOCOL:
                 ret = parse_int(&map, &temp);
-                DEBUG("PIN_PROTOCOL %d \n", ret);
                 req->pin_protocol = (uint8_t)temp;
                 required_parsed++;
                 break;
             case CTAP_CP_REQ_SUB_COMMAND:
                 ret = parse_int(&map, &temp);
-                 DEBUG("SUB_COMMAND %d \n", ret);
                 req->sub_command = (uint8_t)temp;
                 required_parsed++;
                 break;
             case CTAP_CP_REQ_KEY_AGREEMENT:
                 ret = parse_cose_key(&map, &req->key_agreement);
-                DEBUG("KEY_AGREEMENT %d \n", ret);
                 req->key_agreement_present = true;
                 break;
             case CTAP_CP_REQ_PIN_AUTH:
                 len = sizeof(req->pin_auth);
                 ret = parse_fixed_size_byte_array(&map, req->pin_auth, &len);
-                DEBUG("PIN_AUTH %d \n", ret);
                 req->pin_auth_present = true;
                 break;
             case CTAP_CP_REQ_NEW_PIN_ENC:
                 len = sizeof(req->new_pin_enc);
                 ret = parse_byte_array(&map, req->new_pin_enc, &len);
-                DEBUG("PIN_ENC %d \n", ret);
                 req->new_pin_enc_size = len;
                 break;
             case CTAP_CP_REQ_PIN_HASH_ENC:
                 len = sizeof(req->pin_hash_enc);
                 ret = parse_fixed_size_byte_array(&map, req->pin_hash_enc, &len);
                 req->pin_hash_enc_present = true;
-                DEBUG("HASH_ENC %d \n", ret);
                 break;
             default:
                 DEBUG("parse_client_pin unknown key: %d \n", key);

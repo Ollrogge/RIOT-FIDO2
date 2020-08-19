@@ -140,7 +140,7 @@ uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
     return CTAP2_OK;
 }
 
-/* same as bc_aes_cbc_enc except that we use blockEncrypt instead of padDecrypt */
+/* same as bc_aes_cbc_enc except that we use blockEncrypt instead of padEncrypt */
 uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len)
 {

@@ -36,6 +36,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t set_pin(ctap_client_pin_req_t *req);
+static uint8_t change_pin(ctap_client_pin_req_t *req);
 static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static uint8_t key_agreement(CborEncoder *encoder);
@@ -329,8 +330,6 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
         return ret;
     }
 
-    DEBUG("client_pin subcommand: %u \n", req.sub_command);
-
     if (req.pin_protocol != 1 || req.sub_command == 0) {
         return CTAP1_ERR_OTHER;
     }
@@ -345,6 +344,7 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
             ret = set_pin(&req);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
+            ret = change_pin(&req);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_GET_PIN_TOKEN:
             ret = get_pin_token(encoder, &req);
@@ -357,7 +357,92 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
     return ret;
 }
 
-//todo: could combine set_pin and update_pin into 1 function if it is worth it.
+static uint8_t change_pin(ctap_client_pin_req_t *req)
+{
+    sha256_context_t ctx;
+    hmac_context_t ctx2;
+    int ret, len;
+    uint8_t shared_key[CTAP_KEY_LEN];
+    uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
+    uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
+    uint8_t hmac[SHA256_DIGEST_LENGTH];
+    uint8_t new_pin_dec[CTAP_PIN_MAX_SIZE];
+
+    if (!pin_is_set()) {
+        return CTAP2_ERR_PIN_NOT_SET;
+    }
+
+    if (!req->pin_auth_present || !req->key_agreement_present || !req->pin_hash_enc_present) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
+    if (get_remaining_pin_attempts() == 0) {
+        return CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    if (req->new_pin_enc_size < 64) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
+
+    hmac_sha256_init(&ctx2, shared_key, sizeof(shared_key));
+    hmac_sha256_update(&ctx2, req->new_pin_enc, req->new_pin_enc_size);
+    hmac_sha256_update(&ctx2, req->pin_hash_enc, sizeof(req->pin_hash_enc));
+    hmac_sha256_final(&ctx2, hmac);
+
+    if (memcmp(hmac, req->pin_auth, 16) != 0) {
+        DEBUG("Err: pin hmac and pin_auth differ \n");
+        return CTAP2_ERR_PIN_AUTH_INVALID;
+    }
+
+    decrement_pin_attempts();
+
+    len = sizeof(pin_hash_dec);
+    ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
+            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key));
+
+    if (ret != CTAP2_OK) {
+        DEBUG("set pin: error while decrypting pin hash \n");
+        return ret;
+    }
+
+    sha256_init(&ctx);
+    sha256_update(&ctx, pin_hash_dec, 16);
+    sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
+    sha256_final(&ctx, pin_hash_dec_final);
+
+    if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
+        DEBUG("get_pin_token: invalid pin \n");
+        ctap_crypto_reset_key_agreement();
+        save_state(&g_state);
+
+        return CTAP2_ERR_PIN_INVALID;
+    }
+
+    reset_pin_attempts();
+
+    len = sizeof(new_pin_dec);
+    ret = ctap_crypto_aes_dec(new_pin_dec, &len, req->new_pin_enc,
+                         req->new_pin_enc_size, shared_key, sizeof(shared_key));
+
+    if (ret != CTAP2_OK) {
+        DEBUG("set pin: error while decrypting PIN \n");
+        return ret;
+    }
+
+    DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
+
+    len = fmt_strnlen((char*)new_pin_dec, CTAP_PIN_MAX_SIZE);
+    if (len < CTAP_PIN_MIN_SIZE) {
+        return CTAP2_ERR_PIN_POLICY_VIOLATION;
+    }
+
+    ret = save_pin(new_pin_dec, (size_t)len);
+
+    return CTAP2_OK;
+}
+
 static uint8_t set_pin(ctap_client_pin_req_t *req)
 {
     uint8_t shared_key[CTAP_KEY_LEN];
@@ -410,6 +495,70 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
     return CTAP2_OK;
 }
 
+static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
+{
+    sha256_context_t ctx;
+    uint8_t shared_key[CTAP_KEY_LEN];
+    uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
+    uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
+    uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE];
+    int len, ret;
+
+    if (!pin_is_set()) {
+        return CTAP2_ERR_PIN_NOT_SET;
+    }
+
+    if (!req->key_agreement_present || !req->pin_hash_enc_present) {
+        return CTAP2_ERR_MISSING_PARAMETER;
+    }
+
+    if (get_remaining_pin_attempts() == 0) {
+        return CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
+
+    decrement_pin_attempts();
+
+    len = sizeof(pin_hash_dec);
+    ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
+            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key));
+
+    if (ret != CTAP2_OK) {
+        DEBUG("set pin: error while decrypting pin hash \n");
+        return ret;
+    }
+
+    DEBUG("Pin hash: ");
+    print_hex(pin_hash_dec, sizeof(pin_hash_dec));
+
+    sha256_init(&ctx),
+    sha256_update(&ctx, pin_hash_dec, 16);
+    sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
+    sha256_final(&ctx, pin_hash_dec_final);
+
+    if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
+        DEBUG("get_pin_token: invalid pin \n");
+        ctap_crypto_reset_key_agreement();
+        save_state(&g_state);
+
+        return CTAP2_ERR_PIN_INVALID;
+    }
+
+    reset_pin_attempts();
+
+    len = sizeof(pin_token_enc);
+    ret = ctap_crypto_aes_enc(pin_token_enc, &len, g_pin_token,
+                   sizeof(g_pin_token), shared_key, sizeof(shared_key));
+
+    if (ret != CTAP2_OK) {
+        DEBUG("get pin token: error encrypting pin token \n");
+        return ret;
+    }
+
+    return cbor_helper_encode_pin_token(encoder, pin_token_enc, sizeof(pin_token_enc));
+}
+
 static uint8_t save_pin(uint8_t *pin, size_t len)
 {
     uint8_t temp_hash[SHA256_DIGEST_LENGTH];
@@ -439,69 +588,6 @@ static uint8_t key_agreement(CborEncoder *encoder)
     key.params.cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
 
     return cbor_helper_encode_key_agreement(encoder, &key);
-}
-
-static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
-{
-    sha256_context_t ctx;
-    uint8_t shared_key[CTAP_KEY_LEN];
-    uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
-    uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
-    uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE];
-    int len, ret;
-
-    if (!pin_is_set()) {
-        return CTAP2_ERR_PIN_NOT_SET;
-    }
-
-    if (!req->key_agreement_present || !req->pin_hash_enc_present) {
-        return CTAP2_ERR_MISSING_PARAMETER;
-    }
-
-    if (get_remaining_pin_attempts() == 0) {
-        return CTAP2_ERR_PIN_BLOCKED;
-    }
-
-    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
-
-    len = sizeof(pin_hash_dec);
-    ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
-            sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key));
-
-    if (ret != CTAP2_OK) {
-        DEBUG("set pin: error while decrypting pin hash \n");
-        return ret;
-    }
-
-    DEBUG("Pin hash: ");
-    print_hex(pin_hash_dec, sizeof(pin_hash_dec));
-
-    sha256_init(&ctx),
-    sha256_update(&ctx, pin_hash_dec, 16);
-    sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
-    sha256_final(&ctx, pin_hash_dec_final);
-
-    if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
-        DEBUG("get_pin_token: invalid pin \n");
-        ctap_crypto_reset_key_agreement();
-        decrement_pin_attempts();
-        save_state(&g_state);
-
-        return CTAP2_ERR_PIN_INVALID;
-    }
-
-    reset_pin_attempts();
-
-    len = sizeof(pin_token_enc);
-    ret = ctap_crypto_aes_enc(pin_token_enc, &len, g_pin_token,
-                   sizeof(g_pin_token), shared_key, sizeof(shared_key));
-
-    if (ret != CTAP2_OK) {
-        DEBUG("get pin token: error encrypting pin token \n");
-        return ret;
-    }
-
-    return cbor_helper_encode_pin_token(encoder, pin_token_enc, sizeof(pin_token_enc));
 }
 
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk)
