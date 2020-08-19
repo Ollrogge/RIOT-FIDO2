@@ -50,7 +50,6 @@ static uint8_t get_remaining_pin_attempts(void);
 static void decrement_pin_attempts(void);
 static void reset_pin_attempts(void);
 static void reset(void);
-static int reset_key_agreement(void);
 
 static ctap_state_t g_state;
 static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
@@ -58,6 +57,7 @@ static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
 void ctap_init(void)
 {
     int ret;
+    (void)ret;
 
     load_state(&g_state);
 
@@ -393,7 +393,6 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
     ret = ctap_crypto_aes_dec(new_pin_dec, &new_pin_dec_len, req->new_pin_enc,
                          req->new_pin_enc_size, shared_key, sizeof(shared_key));
 
-
     if (ret != CTAP2_OK) {
         DEBUG("set pin: error while decrypting PIN \n");
         return ret;
@@ -473,6 +472,9 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
         DEBUG("set pin: error while decrypting pin hash \n");
         return ret;
     }
+
+    DEBUG("Pin hash: ");
+    print_hex(pin_hash_dec, sizeof(pin_hash_dec));
 
     sha256_init(&ctx),
     sha256_update(&ctx, pin_hash_dec, 16);
@@ -586,8 +588,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
 {
     int ret;
     uint32_t counter = 0;
-    ec_t pub_key;
-    bn_t priv_key;
      /* device aaguid */
     uint8_t aaguid[] = {DEVICE_AAGUID};
 
@@ -640,7 +640,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
                             ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len)
 {
-    int ret;
     sha256_context_t ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
 

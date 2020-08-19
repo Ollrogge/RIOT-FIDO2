@@ -3,6 +3,8 @@
 
 #include "relic.h"
 
+#include "rijndael-api-fst.h"
+
 #include "ctap_crypto.h"
 
 typedef struct
@@ -103,7 +105,7 @@ void ctap_crypto_derive_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
     ec_free(pub);
 }
 
-/* needed because enc pin is not padded but relic's default func expects it to be */
+/* same as bc_aes_cbc_dec except that we use blockDecrypt instead of padDecrypt */
 uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len)
 {
@@ -121,26 +123,24 @@ uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 	if (makeKey2(&key_inst, DIR_DECRYPT, key_len, (char *)key) != TRUE) {
 		return CTAP1_ERR_OTHER;
 	}
-
 	if (cipherInit(&cipher_inst, MODE_CBC, NULL) != TRUE) {
 		return CTAP1_ERR_OTHER;
 	}
 
-    /* min 1 block */
-    if (in_len < 128) {
-        in_len = 128;
+    memcpy(cipher_inst.IV, iv, BC_LEN);
+
+    /*blockDecrypt expects in_len in bits */
+    in_len *= 8;
+    *out_len = blockDecrypt(&cipher_inst, &key_inst, in, in_len, out);
+
+    if (*out_len <= 0) {
+        return CTAP1_ERR_OTHER;
     }
 
-	memcpy(cipher_inst.IV, iv, BC_LEN);
-	*out_len = blockDecrypt(&cipher_inst, &key_inst, in, in_len, out);
-
-	if (*out_len <= 0) {
-		return CTAP1_ERR_OTHER;
-	}
-
-	return CTAP2_OK;
+    return CTAP2_OK;
 }
 
+/* same as bc_aes_cbc_enc except that we use blockEncrypt instead of padDecrypt */
 uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len)
 {
@@ -148,19 +148,33 @@ uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
      * +16 bytes because relic encrypts with padding and will add padding
      * even if in_len % 16 = 0
      */
-    uint8_t out_temp[*out_len + 16];
-    int ret;
+    uint8_t iv[BC_LEN] = {0};
+    keyInstance key_inst;
+	cipherInstance cipher_inst;
 
     /* relic expects key_len in bits */
     key_len *= 8;
 
-    ret = bc_aes_cbc_enc(out_temp, sizeof(out_temp), in, in_len, key, key_len);
+    if (*out_len < in_len) {
+		return CTAP1_ERR_OTHER;
+	}
 
-    if (ret == STS_ERR) {
-        return ret;
+	if (makeKey2(&key_inst, DIR_ENCRYPT, key_len, (char *)key) != TRUE) {
+		return CTAP1_ERR_OTHER;
+	}
+	if (cipherInit(&cipher_inst, MODE_CBC, NULL) != TRUE) {
+		return CTAP1_ERR_OTHER;
     }
 
-    memmove(out, out_temp, *out_len);
+    memcpy(cipher_inst.IV, iv, BC_LEN);
+
+    /*blockEncrypt expects in_len in bits */
+    in_len *= 8;
+    *out_len = blockEncrypt(&cipher_inst, &key_inst, in, in_len, out);
+
+    if (*out_len <= 0) {
+        return CTAP1_ERR_OTHER;
+    }
 
     return CTAP2_OK;
 }
@@ -177,7 +191,7 @@ uint8_t ctap_crypto_gen_keypair(ctap_public_key_t *pub_key, uint8_t *priv_key)
     ec_new(pub);
     bn_new(priv);
 
-    ret = cp_ecdsa(priv, pub);
+    ret = cp_ecdsa_gen(priv, pub);
 
     if (ret == STS_ERR) {
         return CTAP1_ERR_OTHER;

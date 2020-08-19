@@ -152,7 +152,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     int ret;
     CborEncoder map;
     uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
-    size_t sig_buf_len;
+    size_t sig_buf_len = sizeof(sig_buf);
 
     uint8_t map_len = valid_cred_count > 1 ? 5 : 4;
 
@@ -209,7 +209,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     size_t offset = 0;
     uint8_t* cose_key_buf;
     uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
-    size_t sig_buf_len;
+    size_t sig_buf_len = sizeof(sig_buf);
 
     CborEncoder cose_key;
     CborEncoder attest_stmt_map;
