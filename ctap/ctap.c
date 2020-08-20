@@ -28,15 +28,17 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
                                      ctap_pub_key_cred_params_t *cred_params,
-                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk);
+                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk
+                              ,bool uv);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
-                                    ctap_auth_data_header_t *auth_data);
+                                    ctap_auth_data_header_t *auth_data, bool uv);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                              bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t set_pin(ctap_client_pin_req_t *req);
 static uint8_t change_pin(ctap_client_pin_req_t *req);
+static uint8_t get_retries(CborEncoder *encoder);
 static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static uint8_t key_agreement(CborEncoder *encoder);
@@ -48,12 +50,14 @@ static void load_state(ctap_state_t *state);
 static uint8_t is_valid_credential(ctap_cred_desc_t *cred_desc, ctap_resident_key_t *rk);
 static bool pin_is_set(void);
 static uint8_t get_remaining_pin_attempts(void);
-static void decrement_pin_attempts(void);
+static uint8_t decrement_pin_attempts(void);
 static void reset_pin_attempts(void);
 static void reset(void);
+static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len);
 
 static ctap_state_t g_state;
 static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
+static uint8_t g_rem_pin_att_boot;
 
 void ctap_init(void)
 {
@@ -64,13 +68,15 @@ void ctap_init(void)
 
     if (g_state.initialized != CTAP_INITIALIZED_MARKER) {
         g_state.initialized = CTAP_INITIALIZED_MARKER;
-        g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
+        g_state.rem_pin_att = CTAP_PIN_MAX_ATTS;
         g_state.pin_is_set = false;
 
         ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
 
         save_state(&g_state);
     }
+
+    g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
 
     /* todo: what to do if init fails? */
     ret = ctap_crypto_init();
@@ -82,7 +88,8 @@ void ctap_init(void)
 static void reset(void)
 {
     g_state.initialized = CTAP_INITIALIZED_MARKER;
-    g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
+    g_state.rem_pin_att = CTAP_PIN_MAX_ATTS;
+    g_state.rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
     g_state.pin_is_set = false;
     ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
 
@@ -94,19 +101,44 @@ static bool pin_is_set(void)
     return g_state.pin_is_set;
 }
 
-static void decrement_pin_attempts(void)
+static uint8_t decrement_pin_attempts(void)
 {
-    g_state.remaining_pin_attempts--;
+    g_state.rem_pin_att--;
+    g_rem_pin_att_boot--;
+
+    if (g_state.rem_pin_att == 0) {
+        return CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    if (g_rem_pin_att_boot == 0) {
+        return CTAP2_ERR_PIN_AUTH_BLOCKED;
+    }
+
+    return CTAP2_OK;
 }
 
 static uint8_t get_remaining_pin_attempts(void)
 {
-    return g_state.remaining_pin_attempts;
+    return g_state.rem_pin_att;
 }
 
 static void reset_pin_attempts(void)
 {
-    g_state.remaining_pin_attempts = CTAP_PIN_MAX_ATTEMPTS;
+    g_state.rem_pin_att = CTAP_PIN_MAX_ATTS;
+    g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
+}
+
+static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len)
+{
+    uint8_t hmac[SHA256_DIGEST_LENGTH];
+
+    hmac_sha256(g_pin_token, sizeof(g_pin_token), hash, len, hmac);
+
+    if (memcmp(auth, hmac, 16) != 0) {
+        return CTAP2_ERR_PIN_AUTH_INVALID;
+    }
+
+    return CTAP2_OK;
 }
 
 /* webauthn specification (version 20190304) section 6.1.1 */
@@ -208,6 +240,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     ctap_make_credential_req_t req;
     ctap_auth_data_t auth_data;
     ctap_resident_key_t rk;
+    bool uv = false;
 
     memset(&req, 0, sizeof(req));
 
@@ -215,6 +248,21 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
     if (ret != CTAP2_OK) {
         return ret;
+    }
+
+    if (pin_is_set() && !req.pin_auth_present) {
+        return CTAP2_ERR_PIN_REQUIRED;
+    }
+
+    if (pin_is_set() && req.pin_auth_present) {
+        ret = verify_pin_auth(req.pin_auth, req.client_data_hash,
+                              sizeof(req.client_data_hash));
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        uv = true;
     }
 
     DEBUG("Make credential options: %d %d %d \n", req.options.rk,
@@ -231,7 +279,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
-    ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk);
+    ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk, uv);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -254,6 +302,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 {
     int ret;
     bool valid_found = false;
+    bool uv = false;
     uint8_t valid_count = 0;
     ctap_get_assertion_req_t req;
     ctap_resident_key_t rk;
@@ -285,6 +334,21 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return CTAP2_ERR_NO_CREDENTIALS;
     }
 
+    if (pin_is_set() && !req.pin_auth_present) {
+        uv = false;
+    }
+
+    if (pin_is_set() && req.pin_auth_present) {
+        ret = verify_pin_auth(req.pin_auth, req.client_data_hash,
+                              sizeof(req.client_data_hash));
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
+        uv = true;
+    }
+
     /* last moment where transaction can be cancelled */
     mutex_lock(should_cancel_mutex);
     if (*should_cancel) {
@@ -296,7 +360,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return ret;
     }
 
-    ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data);
+    ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -336,6 +400,7 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
 
     switch (req.sub_command) {
         case CTAP_CP_REQ_SUB_COMMAND_GET_RETRIES:
+            ret = get_retries(encoder);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_GET_KEY_AGREEMENT:
             ret = key_agreement(encoder);
@@ -353,8 +418,12 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
             DEBUG("Clientpin subcommand unknown command: %u \n", req.sub_command);
     }
 
-    DEBUG("Client_pin resp: %d \n", ret);
     return ret;
+}
+
+static uint8_t get_retries(CborEncoder *encoder)
+{
+    return cbor_helper_encode_retries(encoder, get_remaining_pin_attempts());
 }
 
 static uint8_t change_pin(ctap_client_pin_req_t *req)
@@ -372,12 +441,12 @@ static uint8_t change_pin(ctap_client_pin_req_t *req)
         return CTAP2_ERR_PIN_NOT_SET;
     }
 
-    if (!req->pin_auth_present || !req->key_agreement_present || !req->pin_hash_enc_present) {
-        return CTAP2_ERR_MISSING_PARAMETER;
+    if (get_remaining_pin_attempts() <= 0) {
+        return CTAP2_ERR_PIN_BLOCKED;
     }
 
-    if (get_remaining_pin_attempts() == 0) {
-        return CTAP2_ERR_PIN_BLOCKED;
+    if (!req->pin_auth_present || !req->key_agreement_present || !req->pin_hash_enc_present) {
+        return CTAP2_ERR_MISSING_PARAMETER;
     }
 
     if (req->new_pin_enc_size < 64) {
@@ -395,8 +464,6 @@ static uint8_t change_pin(ctap_client_pin_req_t *req)
         DEBUG("Err: pin hmac and pin_auth differ \n");
         return CTAP2_ERR_PIN_AUTH_INVALID;
     }
-
-    decrement_pin_attempts();
 
     len = sizeof(pin_hash_dec);
     ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
@@ -416,6 +483,12 @@ static uint8_t change_pin(ctap_client_pin_req_t *req)
         DEBUG("get_pin_token: invalid pin \n");
         ctap_crypto_reset_key_agreement();
         save_state(&g_state);
+
+        ret = decrement_pin_attempts();
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
 
         return CTAP2_ERR_PIN_INVALID;
     }
@@ -518,8 +591,6 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
 
     ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
 
-    decrement_pin_attempts();
-
     len = sizeof(pin_hash_dec);
     ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
             sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key));
@@ -542,10 +613,17 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
         ctap_crypto_reset_key_agreement();
         save_state(&g_state);
 
+        ret = decrement_pin_attempts();
+
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
+
         return CTAP2_ERR_PIN_INVALID;
     }
 
     reset_pin_attempts();
+    save_state(&g_state);
 
     len = sizeof(pin_token_enc);
     ret = ctap_crypto_aes_enc(pin_token_enc, &len, g_pin_token,
@@ -651,7 +729,7 @@ static void load_state(ctap_state_t *state)
     memmove(state, page, sizeof(*state));
 }
 
-static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data)
+static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data, bool uv)
 {
     memset(auth_data, 0, sizeof(*auth_data));
 
@@ -663,14 +741,18 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth
     get_auth_data_sign_count(&counter);
     auth_data->counter = counter;
 
-    /* todo: faking user presence because it is necessary for registration */
+    /* todo: faking user presence for now */
     auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;
+
+    if (uv) {
+        auth_data->flags |= CTAP_AUTH_DATA_FLAG_UV;
+    }
 
     return CTAP2_OK;
 }
 
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
-                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk)
+                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk, bool uv)
 {
     int ret;
     uint32_t counter = 0;
@@ -689,6 +771,10 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
 
     /* todo: faking user presence because it is necessary for registration */
     auth_header->flags |= CTAP_AUTH_DATA_FLAG_UP;
+
+    if (uv) {
+        auth_header->flags |= CTAP_AUTH_DATA_FLAG_UV;
+    }
 
     /* get sign counter */
     get_auth_data_sign_count(&counter);

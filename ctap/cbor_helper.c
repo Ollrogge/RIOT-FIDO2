@@ -327,7 +327,28 @@ uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t
     ret = cbor_encoder_close_container(encoder, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    return ret;
+    return CTAP2_OK;
+}
+
+uint8_t cbor_helper_encode_retries(CborEncoder *encoder, uint8_t tries_left)
+{
+    int ret;
+    CborEncoder map;
+
+    ret = cbor_encoder_create_map(encoder, &map, 1);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_int(&map, CTAP_CP_RESP_RETRIES);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encode_int(&map, (int)tries_left);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    ret = cbor_encoder_close_container(encoder, &map);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    return CTAP2_OK;
+
 }
 
 uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_t size)
@@ -347,7 +368,7 @@ uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_
     ret = cbor_encoder_close_container(encoder, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    return ret;
+    return CTAP2_OK;
 }
 
 // todo pass user entity struct once unnecessary field are removed
@@ -424,6 +445,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
 {
     int ret;
     int key;
+    int temp;
     size_t len;
     CborParser parser;
     CborValue it;
@@ -485,9 +507,14 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
                 break;
             case CTAP_GA_REQ_PIN_AUTH:
                 DEBUG("CTAP_get_assertion parse pin_auth \n");
+                len = 16;
+                ret = parse_fixed_size_byte_array(&map, req->pin_auth, &len);
+                req->pin_auth_present = true;
                 break;
             case CTAP_GA_REQ_PIN_PROTOCOL:
                 DEBUG("CTAP_get_assertion parse pin_protocol \n");
+                ret = parse_int(&map, &temp);
+                req->pin_protocol = (uint8_t)temp;
                 break;
             default:
                 DEBUG("CTAP_get_assertion unknown key: %d \n", key);
@@ -601,14 +628,13 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
 
 uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size, uint8_t* req_raw)
 {
-    int ret;
-    int key;
+    int ret, key, temp;
     size_t len;
     CborParser parser;
     CborValue it;
     CborValue map;
-    size_t map_len;
     CborType type;
+    size_t map_len;
 
     uint8_t required_parsed = 0;
 
@@ -673,9 +699,14 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 break;
             case CTAP_MC_REQ_PIN_AUTH:
                 DEBUG("CTAP_make_credential parse pin_auth \n");
+                len = 16;
+                ret = parse_fixed_size_byte_array(&map, req->pin_auth, &len);
+                req->pin_auth_present = true;
                 break;
             case CTAP_MC_REQ_PIN_PROTOCOL:
                 DEBUG("CTAP_make_credential parse pin_protocol \n");
+                ret = parse_int(&map, &temp);
+                req->pin_protocol = (uint8_t)temp;
                 break;
             default:
                 DEBUG("CTAP_make_credential unknown key: %d \n", key);

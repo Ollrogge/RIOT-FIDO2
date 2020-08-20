@@ -125,6 +125,16 @@ uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t
 uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_t size);
 
 /**
+ * @brief Encode PIN tries left
+ *
+ * @param[in] encoder           CBOR encoder
+ * @param[in] token             amount of tries left
+ *
+ * @return CTAP status code
+ */
+uint8_t cbor_helper_encode_retries(CborEncoder *encoder, uint8_t tries_left);
+
+/**
  * @brief Parse credential description
  *
  * @param[in] arr   CBOR array

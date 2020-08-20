@@ -166,9 +166,14 @@ extern "C" {
 #define CTAP_PIN_SALT_SIZE 32
 
 /**
- * @brief max consecutive incorrect PIN attempts
+ * @brief max total consecutive incorrect PIN attempts
  */
-#define CTAP_PIN_MAX_ATTEMPTS 8
+#define CTAP_PIN_MAX_ATTS 8
+
+/**
+ * @brief max consecutive incorrect PIN attempts for 1 boot cycle
+ */
+#define CTAP_PIN_MAX_ATTS_BOOT 3
 
 /**
  * @brief Size of pin token
@@ -460,6 +465,10 @@ typedef struct
     ctap_options_t options;                             /**< parameters to influence authenticator operation */
     CborValue exclude_list;                             /**< cbor array holding exclude list */
     size_t exclude_list_len;                            /**< length of CBOR exclude list array */
+    uint8_t pin_auth[16];                               /**< pin_auth if PIN is set */
+    bool pin_auth_present;                              /**< pin_auth present ? */
+    uint8_t pin_protocol;                               /**< PIN protocol version */
+
 } ctap_make_credential_req_t;
 
 /**
@@ -474,6 +483,9 @@ typedef struct
     ctap_options_t options;                             /**< parameters to influence authenticator operation */
     CborValue allow_list;                               /**< cbor array holding allow list */
     uint8_t allow_list_len;                             /**< length of CBOR allow list array */
+    uint8_t pin_auth[16];                               /**< pin_auth if PIN is set */
+    bool pin_auth_present;                              /**< pin_auth present ? */
+    uint8_t pin_protocol;                               /**< PIN protocol version */
 } ctap_get_assertion_req_t;
 
 /**
@@ -588,7 +600,8 @@ typedef struct
 {
     uint8_t initialized;    /**< CTAP is initialized or not */
     bool pin_is_set;            /**< PIN is set or not */
-    uint8_t remaining_pin_attempts; /**< remaining PIN tries */
+    uint8_t rem_pin_att; /**< remaining PIN tries */
+    uint8_t rem_pin_att_boot; /**< remaining PIN attempts for this power cycle */
     uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
     uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
 } ctap_state_t;

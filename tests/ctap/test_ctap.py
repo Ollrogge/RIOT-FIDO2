@@ -1,15 +1,11 @@
 from fido2.hid import CtapHidDevice, CAPABILITY
-from fido2.ctap2 import CTAP2, PinProtocolV1, AttestationObject, AttestedCredentialData
+from fido2.ctap2 import CTAP2, PinProtocolV1, AttestationObject, AttestedCredentialData, CtapError
 from fido2.attestation import Attestation
 from fido2.client import Fido2Client
 from fido2.server import Fido2Server
 from getpass import getpass
 from binascii import a2b_hex
 from hashlib import sha256
-
-#from fastecdsa.curve import P256
-#from fastecdsa.encoding.der import DEREncoder
-#from fastecdsa import keys, ecdsa
 
 import unittest
 
@@ -55,7 +51,7 @@ class TestCtap(unittest.TestCase):
 
         dev.close()
 
-    #@unittest.skip
+    @unittest.skip
     def test_pin(self):
         try:
             dev = get_device()
@@ -68,53 +64,76 @@ class TestCtap(unittest.TestCase):
             pin1 = PinProtocolV1(ctap)
             PIN = "12345"
             PIN2 = "54321"
+            PIN_FALSE = "11111"
 
             # reset state so we can set pin without error
             ctap.reset()
 
             pin1.set_pin(PIN)
 
+            retries_max = pin1.get_pin_retries()
+
+            try:
+                resp = pin1.get_pin_token(PIN_FALSE)
+            except CtapError as e:
+                self.assertEqual(e.code, CtapError.ERR.PIN_INVALID)
+
+            retries_left = pin1.get_pin_retries()
+            self.assertEqual(retries_max - 1, retries_left)
+
             resp = pin1.get_pin_token(PIN)
             print(f"Get pin token resp: {resp}")
 
+            retries_left = pin1.get_pin_retries()
+            self.assertEqual(retries_max, retries_left)
+
             pin1.change_pin(PIN, PIN2)
+
+            try:
+                resp = pin1.get_pin_token(PIN)
+            except CtapError as e:
+                self.assertEqual(e.code, CtapError.ERR.PIN_INVALID)
+
+            resp = pin1.get_pin_token(PIN2)
+
+            for i in range(3):
+                try:
+                    resp = pin1.get_pin_token(PIN)
+                except CtapError as e:
+                    if i == 2:
+                        self.assertEqual(e.code, CtapError.ERR.PIN_AUTH_BLOCKED)
+                    else:
+                        self.assertEqual(e.code, CtapError.ERR.PIN_INVALID)
 
         else:
             print("Device does not support CBOR")
 
     @unittest.skip
-    def test_make_credential_and_get_assertion2(self):
+    def test_make_credential_and_get_assertion(self):
         print()
-        print("*** test_make_credential_and_get_assertion ***")
+        print("*** test_make_credential_and_get_assertion with PIN***")
         try:
             dev = get_device()
         except Exception:
             self.fail("Unable to find hid device")
             return
 
-        use_prompt = False
-        pin = None
-        uv = "discouraged"
+        ctap = CTAP2(dev)
+        pin1 = PinProtocolV1(ctap)
+
+        # reset state so we can set pin without error
+        ctap.reset()
 
         client = Fido2Client(dev, "https://example.com")
-            # Prefer UV if supported
-        if client.info.options.get("uv"):
-            uv = "preferred"
-            print("Authenticator supports User Verification")
-        elif client.info.options.get("clientPin"):
-            # Prompt for PIN if needed
-            pin = getpass("Please enter PIN: ")
-        else:
-            print("PIN not set, won't use")
 
         server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
         user = {"id": b"user_id", "name": "A. User"}
 
-        # Prepare parameters for makeCredential
-        create_options, state = server.register_begin(user, user_verification=uv)
+         # Prepare parameters for makeCredential
+        create_options, state = server.register_begin(user)
 
         attestation_object, client_data = client.make_credential(
-            create_options["publicKey"], pin=pin)
+            create_options["publicKey"])
 
         # Complete registration
         auth_data = server.register_complete(state, client_data, attestation_object)
@@ -122,15 +141,10 @@ class TestCtap(unittest.TestCase):
 
         print("New credential created!")
 
-        print("CLIENT DATA:", client_data)
-        print("ATTESTATION OBJECT:", attestation_object)
-        print()
-        print("CREDENTIAL DATA:", auth_data.credential_data)
-
         # Prepare parameters for getAssertion
-        request_options, state = server.authenticate_begin(credentials, user_verification=uv)
+        request_options, state = server.authenticate_begin(credentials)
 
-        assertions, client_data = client.get_assertion(request_options["publicKey"], pin=pin)
+        assertions, client_data = client.get_assertion(request_options["publicKey"])
         assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
 
         # Complete authenticator
@@ -145,52 +159,68 @@ class TestCtap(unittest.TestCase):
 
         print("Credential authenticated!")
 
-        print("CLIENT DATA:", client_data)
-        print()
-        print("ASSERTION DATA:", assertion)
 
-'''
-    @unittest.skip
-    def test_make_credential_and_get_assertion(self):
+    #@unittest.skip
+    def test_make_credential_and_get_assertion_PIN(self):
+        print()
+        print("*** test_make_credential_and_get_assertion with PIN***")
         try:
             dev = get_device()
         except Exception:
             self.fail("Unable to find hid device")
             return
 
-        #random hash for now
-        m = sha256()
-        m.update(b"random stuff")
-        client_data_hash = m.digest()
-        rp = {"id": RP_ID, "name": "Example RP"}
+        uv = "preferred"
+        PIN = "12345"
+
+        ctap = CTAP2(dev)
+        pin1 = PinProtocolV1(ctap)
+
+        # reset state so we can set pin without error
+        ctap.reset()
+
+        pin1.set_pin(PIN)
+
+        client = Fido2Client(dev, "https://example.com")
+
+        #authenticator support user verification
+        self.assertTrue(client.info.options.get("uv"))
+
+        #PIN has been set
+        self.assertTrue(client.info.options.get("clientPin"))
+
+        server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
         user = {"id": b"user_id", "name": "A. User"}
-        key_params = [{"type": "public-key", "alg": -7}]
 
-        ctap2 = CTAP2(dev)
+        # Prepare parameters for makeCredential
+        create_options, state = server.register_begin(user, user_verification=uv)
 
-        resp = ctap2.make_credential(client_data_hash, rp, user, key_params)
+        attestation_object, client_data = client.make_credential(
+            create_options["publicKey"], pin=PIN)
 
-        print("Make credential resp: ", resp)
+        # Complete registration
+        auth_data = server.register_complete(state, client_data, attestation_object)
+        credentials = [auth_data.credential_data]
 
-        sig = resp.att_statement['sig']
-        pub_key = resp.auth_data.credential_data.public_key
+        print("New credential created!")
 
-        Attestation.for_type(resp.fmt)().verify(
-            resp.att_statement,
-            resp.auth_data,
-            client_data_hash
+        # Prepare parameters for getAssertion
+        request_options, state = server.authenticate_begin(credentials, user_verification=uv)
+
+        assertions, client_data = client.get_assertion(request_options["publicKey"], pin=PIN)
+        assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
+
+        # Complete authenticator
+        server.authenticate_complete(
+            state,
+            credentials,
+            assertion.credential["id"],
+            client_data,
+            assertion.auth_data,
+            assertion.signature,
         )
 
-        print("")
-
-        resp = ctap2.get_assertion(RP_ID, client_data_hash)
-
-        print("Get assertion resp: ", resp)
-
-        resp.verify(client_data_hash, pub_key)
-
-        dev.close()
-'''
+        print("Credential authenticated!")
 
 if __name__ == '__main__':
     unittest.main()
