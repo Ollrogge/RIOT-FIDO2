@@ -40,12 +40,6 @@ class TestCtap(unittest.TestCase):
             self.assertEqual(info.versions, ['FIDO_2_0'])
             self.assertEqual(info.aaguid, a2b_hex("9c295865fa2c36b705a42320af9c8f16"))
 
-            self.assertEqual(info.options, {
-                'rk': True,
-                'up': True,
-                'plat': False
-            })
-            self.assertEqual(info.max_msg_size, 1024)
         else:
             print("Device does not support CBOR")
 
@@ -182,9 +176,6 @@ class TestCtap(unittest.TestCase):
         pin1.set_pin(PIN)
 
         client = Fido2Client(dev, "https://example.com")
-
-        #authenticator support user verification
-        self.assertTrue(client.info.options.get("uv"))
 
         #PIN has been set
         self.assertTrue(client.info.options.get("clientPin"))

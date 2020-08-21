@@ -38,109 +38,112 @@ static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type)
 }
 
 /* CTAP specification (version 20190130) section 5.4 */
-// TODO: THESE SETTINGS MIGHT DIFFER FOR EACH IOT DEVICE. WHAT TO DO ABOUT THIS ?
-// todo: seperate cbor encoding and logical info level more. e.g encode a struct holding all the info
-uint8_t cbor_helper_get_info(CborEncoder* encoder)
+uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
 {
     int ret;
-
-    uint8_t aaguid[] = {DEVICE_AAGUID};
-    /* A map of pairs of data items. Maps are also called tables,
-    dictionaries, hashes, or objects (in JSON). */
+    size_t sz = 0;
     CborEncoder map;
     CborEncoder map2;
     CborEncoder array;
+    CborEncoder array2;
 
-    /**
-     * All functions operating on a CborValue return a CborError condition,
-     * with CborNoError standing for the normal situation in which no parsing error occurred.
-     * All functions may return parsing errors in case the stream cannot be decoded properly,
-     * be it due to corrupted data or due to reaching the end of the input buffer.
-    */
-
-    ret = cbor_encoder_create_map(encoder, &map, 4);
+    ret = cbor_encoder_create_map(encoder, &map, 5);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    /**
-     *  Supported versions are: "FIDO_2_0" for CTAP2 / FIDO2 / Web Authentication authenticators
-     *  and "U2F_V2" for CTAP1/U2F authenticators.
-     */
+    if (info->versions & CTAP_VERSION_FLAG_FIDO) sz++;
+    if (info->versions & CTAP_VERSION_FLAG_FIDO_PRE) sz++;
 
-    /* versions */
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_VERSIONS);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_create_array(&map, &array, 1);
+    ret = cbor_encoder_create_array(&map, &array, sz);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_text_stringz(&array, CTAP_VERSION_STRING_FIDO);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    if (info->versions & CTAP_VERSION_FLAG_FIDO) {
+        ret = cbor_encode_text_stringz(&array, CTAP_VERSION_STRING_FIDO);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+    if (info->versions & CTAP_VERSION_FLAG_FIDO_PRE) {
+        ret = cbor_encode_text_stringz(&array, CTAP_VERSION_STRING_FIDO_PRE);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+
     ret = cbor_encoder_close_container(&map, &array);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-
-    /* extensions */
-    /*
-    ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_EXTENSIONS);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_create_array(&map, &array, 0);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_close_container(&map, &array);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    */
-
-
-    /* aaguid */
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_AAGUID);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_byte_string(&map, aaguid, 16);
+    ret = cbor_encode_byte_string(&map, info->aaguid, info->len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
+    sz = 0;
+
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_PLAT) sz++;
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_RK) sz++;
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN) sz++;
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_UP) sz++;
 
     /* order of the items is important. needs to be canonical CBOR */
-    /* https://tools.ietf.org/html/rfc7049#section-3.9 (The keys in every map must be sorted lowest value to highest) */
-    /* options */
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_OPTIONS);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_create_map(&map, &map2, 3);
+    ret = cbor_encoder_create_map(&map, &map2, sz);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_RK, 2);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_boolean(&map2, 1); /* capable of storing keys on the device */
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    /* clientPin: if absent, it indicates that the device is not capable of accepting a PIN from the client */
-    ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_UP, 2);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_boolean(&map2, 1); /* not capable of testing user presence */
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_PLAT, 4);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_boolean(&map2, 0); /* not attached to platform */
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    /* user verification: If absent, it indicates that the device is not capable of user verification within itself.*/
+
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_RK) {
+        ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_RK, 2);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = cbor_encode_boolean(&map2, 1);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_UP) {
+        ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_UP, 2);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = cbor_encode_boolean(&map2, 1);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+    /* default for up is true to gotta set false explicitly if not supported */
+    else {
+        ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_UP, 2);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = cbor_encode_boolean(&map2, 0);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_PLAT) {
+        ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_PLAT, 4);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = cbor_encode_boolean(&map2, 1);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+    }
+    if (info->options & CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN) {
+        ret = cbor_encode_text_string(&map2, CTAP_GET_INFO_RESP_OPTIONS_ID_CLIENT_PIN, 9);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        if (info->pin_is_set) {
+            ret = cbor_encode_boolean(&map2, 1);
+            if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        }
+        else {
+            ret = cbor_encode_boolean(&map2, 0);
+            if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        }
+    }
+
     ret = cbor_encoder_close_container(&map, &map2);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-
-    /* maxMsgSize */
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_MAX_MSG_SIZE);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_uint(&map, CTAP_MAX_MSG_SIZE);
+    ret = cbor_encode_uint(&map, info->max_msg_size);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-
-    /* pinProtocols */
-    /*
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_PIN_PROTOCOLS);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_create_array(&map, &array, 0);
+    ret = cbor_encoder_create_array(&map, &array2, 1);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encoder_close_container(&map, &array);
+    ret = cbor_encode_int(&array2, info->pin_protocol);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    */
-
+    ret = cbor_encoder_close_container(&map, &array2);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encoder_close_container(encoder, &map);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-
 
     return CTAP2_OK;
 }

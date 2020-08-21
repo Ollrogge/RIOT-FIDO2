@@ -176,6 +176,11 @@ extern "C" {
 #define CTAP_PIN_MAX_ATTS_BOOT 3
 
 /**
+ * @brief PIN protocol version
+ */
+#define CTAP_PIN_PROT_VER 1
+
+/**
  * @brief Size of pin token
  */
 #define CTAP_PIN_TOKEN_SIZE 16
@@ -196,6 +201,16 @@ extern "C" {
 /** @} */
 
 /**
+ * @name CTAP version flags
+ *
+ * @{
+ */
+#define CTAP_VERSION_FLAG_FIDO_PRE  0x01
+#define CTAP_VERSION_FLAG_FIDO      0x02
+#define CTAP_VERSION_FLAG_U2F_V2    0x04
+/** @} */
+
+/**
  * @name CTAP get info response options map CBOR key values
  *
  * All options are in the form key-value pairs with string IDs and boolean values
@@ -206,6 +221,17 @@ extern "C" {
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_CLIENT_PIN "clientPin"
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_UP         "up"
 #define CTAP_GET_INFO_RESP_OPTIONS_ID_UV         "uv"
+/** @} */
+
+/**
+ * @name CTAP get info options flags
+ *
+ */
+#define CTAP_INFO_OPTIONS_FLAG_PLAT         (1 << 0)
+#define CTAP_INFO_OPTIONS_FLAG_RK           (1 << 1)
+#define CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN   (1 << 2)
+#define CTAP_INFO_OPTIONS_FLAG_UP           (1 << 3)
+#define CTAP_INFO_OPTIONS_FLAG_UV           (1 << 4)
 /** @} */
 
 /**
@@ -605,6 +631,17 @@ typedef struct
     uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
     uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
 } ctap_state_t;
+
+typedef struct
+{
+    uint8_t versions;   /**< supported versions of FIDO */
+    uint8_t *aaguid;    /**< AAGUID */
+    size_t len;         /**< len of AAGUID */
+    uint8_t options;    /**< supported options */
+    uint16_t max_msg_size; /**< max message size */
+    uint8_t pin_protocol; /**< supported PIN protocol versions */
+    bool pin_is_set;  /**< PIN is set or not */
+} ctap_info_t;
 
 /**
  * @brief Handle CBOR encoded ctap request.

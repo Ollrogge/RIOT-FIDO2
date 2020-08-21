@@ -24,6 +24,7 @@
 
 #define CTAP_TESTING 1
 
+static uint8_t get_info(CborEncoder *encoder);
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                 bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
@@ -190,7 +191,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
     {
         case CTAP_GET_INFO:
             DEBUG("CTAP GET INFO \n");
-            resp->status = cbor_helper_get_info(&encoder);
+            resp->status = get_info(&encoder);
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_MAKE_CREDENTIAL:
@@ -230,6 +231,32 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
     }
 
     return 0;
+}
+
+static uint8_t get_info(CborEncoder *encoder)
+{
+    ctap_info_t info;
+    memset(&info, 0, sizeof(info));
+
+    info.versions |= CTAP_VERSION_FLAG_FIDO;
+
+    uint8_t aaguid[] = {DEVICE_AAGUID};
+
+    info.aaguid = aaguid;
+    info.len = sizeof(aaguid);
+
+    info.options |= CTAP_INFO_OPTIONS_FLAG_PLAT;
+    info.options |= CTAP_INFO_OPTIONS_FLAG_RK;
+    info.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
+    info.options |= CTAP_INFO_OPTIONS_FLAG_UP;
+
+    info.max_msg_size = CTAP_MAX_MSG_SIZE;
+
+    info.pin_protocol = CTAP_PIN_PROT_VER;
+
+    info.pin_is_set = pin_is_set();
+
+    return cbor_helper_encode_info(encoder, &info);
 }
 
 /* CTAP specification (version 20190130) section 5.1 */

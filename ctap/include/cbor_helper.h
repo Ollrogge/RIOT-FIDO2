@@ -33,10 +33,11 @@ extern "C" {
  * @brief Encode CBOR info map
  *
  * @param[in] encoder   CBOR encoder
+ * @param[in] info      information about capabilities
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_get_info(CborEncoder* encoder);
+uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info);
 
 /**
  * @brief Parse raw MakeCredential request into struct
