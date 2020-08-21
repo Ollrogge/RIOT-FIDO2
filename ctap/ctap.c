@@ -37,8 +37,8 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
                              bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool *should_cancel, mutex_t *should_cancel_mutex);
-static uint8_t set_pin(ctap_client_pin_req_t *req);
-static uint8_t change_pin(ctap_client_pin_req_t *req);
+static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex);
+static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex);
 static uint8_t get_retries(CborEncoder *encoder);
 static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req);
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
@@ -453,7 +453,7 @@ static uint8_t get_retries(CborEncoder *encoder)
     return cbor_helper_encode_retries(encoder, get_remaining_pin_attempts());
 }
 
-static uint8_t change_pin(ctap_client_pin_req_t *req)
+static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex)
 {
     sha256_context_t ctx;
     hmac_context_t ctx2;
@@ -538,12 +538,19 @@ static uint8_t change_pin(ctap_client_pin_req_t *req)
         return CTAP2_ERR_PIN_POLICY_VIOLATION;
     }
 
+     /* last moment where transaction can be cancelled */
+    mutex_lock(should_cancel_mutex);
+    if (*should_cancel) {
+        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+    mutex_unlock(should_cancel_mutex);
+
     ret = save_pin(new_pin_dec, (size_t)len);
 
     return CTAP2_OK;
 }
 
-static uint8_t set_pin(ctap_client_pin_req_t *req)
+static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex)
 {
     uint8_t shared_key[CTAP_KEY_LEN];
     uint8_t hmac[SHA256_DIGEST_LENGTH];
@@ -589,6 +596,13 @@ static uint8_t set_pin(ctap_client_pin_req_t *req)
     if (new_pin_dec_len < CTAP_PIN_MIN_SIZE) {
         return CTAP2_ERR_PIN_POLICY_VIOLATION;
     }
+
+     /* last moment where transaction can be cancelled */
+    mutex_lock(should_cancel_mutex);
+    if (*should_cancel) {
+        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+    mutex_unlock(should_cancel_mutex);
 
     ret = save_pin(new_pin_dec, (size_t)new_pin_dec_len);
 
@@ -685,12 +699,14 @@ static uint8_t save_pin(uint8_t *pin, size_t len)
 
 static uint8_t key_agreement(CborEncoder *encoder)
 {
-    ctap_public_key_t key;
+    ctap_cose_key_t key;
 
     ctap_crypto_get_key_agreement(&key);
 
-    key.params.alg_type = CTAP_COSE_ALG_ECDH_ES_HKDF_256;
-    key.params.cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
+    key.alg_type = CTAP_COSE_ALG_ECDH_ES_HKDF_256;
+    key.cred_type = CTAP_PUB_KEY_CRED_PUB_KEY;
+    key.crv = CTAP_COSE_KEY_CRV_P256;
+    key.kty = CTAP_COSE_KEY_KTY_EC2;
 
     return cbor_helper_encode_key_agreement(encoder, &key);
 }
@@ -814,14 +830,16 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, c
     cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
     cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 
-    ret = ctap_crypto_gen_keypair(&cred_data->pub_key, rk->priv_key);
+    ret = ctap_crypto_gen_keypair(&cred_data->key, rk->priv_key);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
-    cred_data->pub_key.params.alg_type = cred_params->alg_type;
-    cred_data->pub_key.params.cred_type = cred_params->cred_type;
+    cred_data->key.alg_type = cred_params->alg_type;
+    cred_data->key.cred_type = cred_params->cred_type;
+    cred_data->key.crv = CTAP_COSE_KEY_CRV_P256;
+    cred_data->key.kty = CTAP_COSE_KEY_KTY_EC2;
 
     /* init resident key struct */
     memmove(rk->rp_id_hash, auth_header->rp_id_hash, sizeof(rk->rp_id_hash));

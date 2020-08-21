@@ -515,15 +515,22 @@ typedef struct
 } ctap_get_assertion_req_t;
 
 /**
- * @brief CTAP P256 curve public key struct
+ * @brief CTAP cose key struct
  *
+ * https://www.iana.org/assignments/cose/cose.xhtml
  */
 typedef struct
 {
-    uint8_t x[32];                          /**< x coordinate of point on curve */
-    uint8_t y[32];                          /**< y coordinate of point on curve */
-    ctap_pub_key_cred_params_t params;      /**< info about algorithm used */
-} ctap_public_key_t;
+    struct {
+        uint8_t x[32];
+        uint8_t y[32];
+    } pubkey;
+
+    int kty;             /**< identification of key type */
+    int crv;             /**< EC identifier */
+    int32_t alg_type;    /**< COSEAlgorithmIdentifier */
+    uint8_t cred_type;  /**< type of credential */
+} ctap_cose_key_t;
 
 /**
  * @brief CTAP attested credential data header struct
@@ -545,7 +552,7 @@ typedef struct __attribute__((packed))
 typedef struct
 {
     ctap_attested_cred_data_header_t header;
-    ctap_public_key_t pub_key;
+    ctap_cose_key_t key;
 } ctap_attested_cred_data_t;
 
 /**
@@ -582,23 +589,6 @@ struct __attribute__((packed)) ctap_resident_key
     uint8_t user_id_len;
     uint8_t priv_key[32];
 };
-
-/**
- * @brief CTAP cose key struct
- *
- * https://www.iana.org/assignments/cose/cose.xhtml
- */
-typedef struct
-{
-    struct {
-        uint8_t x[32];
-        uint8_t y[32];
-    } pubkey;
-
-    int kty;             /**< identification of key type */
-    int crv;             /**< EC identifier */
-    int32_t alg_type;    /**< COSEAlgorithmIdentifier */
-} ctap_cose_key_t;
 
 /**
  * @brief CTAP client pin request struct

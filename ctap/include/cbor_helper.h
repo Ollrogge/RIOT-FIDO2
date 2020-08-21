@@ -112,7 +112,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t *key);
+uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_cose_key_t *key);
 
 /**
  * @brief Encode encrypted pin token

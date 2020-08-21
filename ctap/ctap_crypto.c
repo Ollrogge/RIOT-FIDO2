@@ -63,15 +63,15 @@ int ctap_crypto_reset_key_agreement(void)
     return cp_ecdh_gen(g_ag_key.priv, g_ag_key.pub);
 }
 
-void ctap_crypto_get_key_agreement(ctap_public_key_t *key)
+void ctap_crypto_get_key_agreement(ctap_cose_key_t *key)
 {
-    fp_write_bin(key->x, sizeof(key->x), g_ag_key.pub->x);
-    fp_write_bin(key->y, sizeof(key->y), g_ag_key.pub->y);
+    fp_write_bin(key->pubkey.x, sizeof(key->pubkey.x), g_ag_key.pub->x);
+    fp_write_bin(key->pubkey.y, sizeof(key->pubkey.y), g_ag_key.pub->y);
 }
 
 void ctap_crypto_derive_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
 {
-    /* translate pub_key into relic internal structure */
+    /* translate key into relic internal structure */
     uint8_t *x = cose->pubkey.x;
     uint8_t *y = cose->pubkey.y;
     uint8_t sz = sizeof(cose->pubkey.x);
@@ -179,7 +179,7 @@ uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
     return CTAP2_OK;
 }
 
-uint8_t ctap_crypto_gen_keypair(ctap_public_key_t *pub_key, uint8_t *priv_key)
+uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 {
     ec_t pub;
     bn_t priv;
@@ -197,10 +197,10 @@ uint8_t ctap_crypto_gen_keypair(ctap_public_key_t *pub_key, uint8_t *priv_key)
         return CTAP1_ERR_OTHER;
     }
 
-    fp_write_bin(pub_key->x, sizeof(pub_key->x), pub->x);
-    fp_write_bin(pub_key->y, sizeof(pub_key->y), pub->y);
+    fp_write_bin(key->pubkey.x, sizeof(key->pubkey.x), pub->x);
+    fp_write_bin(key->pubkey.y, sizeof(key->pubkey.y), pub->y);
 
-    bn_write_bin(priv_key, sizeof(pub_key->x), priv);
+    bn_write_bin(priv_key, sizeof(key->pubkey.x), priv);
 
     ec_free(pub);
     bn_free(priv);

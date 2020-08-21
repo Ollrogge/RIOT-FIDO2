@@ -12,7 +12,7 @@ static uint8_t parse_allow_list(CborValue *it, CborValue *allow_list, size_t *al
 static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len);
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t parse_cose_key(CborValue *it, ctap_cose_key_t *cose_key);
-static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t *pub_key);
+static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t *key);
 static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_desc);
 static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
 
@@ -242,7 +242,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
 
     cbor_encoder_init(&cose_key, cose_key_buf, sizeof(auth_data_buf) - offset, 0);
 
-    ret = encode_cose_key(&cose_key, &auth_data->attested_cred_data.pub_key);
+    ret = encode_cose_key(&cose_key, &auth_data->attested_cred_data.key);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     offset += cbor_encoder_get_buffer_size(&cose_key, cose_key_buf);
@@ -314,7 +314,7 @@ static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_de
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_public_key_t *key)
+uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_cose_key_t *key)
 {
     int ret;
     CborEncoder map;
@@ -395,7 +395,7 @@ static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
 }
 
 /* https://tools.ietf.org/html/rfc8152#page-34 Section 13.1.1 */
-static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key)
+static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t* key)
 {
     int ret;
     CborEncoder map;
@@ -405,27 +405,27 @@ static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_public_key_t* pub_key
 
     ret = cbor_encode_int(&map, CTAP_COSE_KEY_LABEL_KTY);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_int(&map, CTAP_COSE_KEY_KTY_EC2);
+    ret = cbor_encode_int(&map, key->kty);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_int(&map, CTAP_COSE_KEY_LABEL_ALG);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_int(&map, pub_key->params.alg_type);
+    ret = cbor_encode_int(&map, key->alg_type);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_int(&map, CTAP_COSE_KEY_LABEL_CRV);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_int(&map, CTAP_COSE_KEY_CRV_P256);
+    ret = cbor_encode_int(&map, key->crv);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_int(&map, CTAP_COSE_KEY_LABEL_X);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_byte_string(&map, pub_key->x, sizeof(pub_key->x));
+    ret = cbor_encode_byte_string(&map, key->pubkey.x, sizeof(key->pubkey.x));
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_int(&map, CTAP_COSE_KEY_LABEL_Y);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_byte_string(&map, pub_key->y, sizeof(pub_key->y));
+    ret = cbor_encode_byte_string(&map, key->pubkey.y, sizeof(key->pubkey.y));
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encoder_close_container(cose_key, &map);
