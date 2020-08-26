@@ -643,7 +643,7 @@ typedef struct
  * @return size of cbor encoded response data
  */
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
-                           bool *should_cancel, mutex_t *should_cancel_mutex);
+                           bool (*should_cancel)(void));
 
 /**
  * @brief Initialize ctap and load state

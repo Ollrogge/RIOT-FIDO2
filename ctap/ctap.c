@@ -26,21 +26,22 @@
 
 static uint8_t get_info(CborEncoder *encoder);
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
-                                bool *should_cancel, mutex_t *should_cancel_mutex);
+                               bool (*should_cancel)(void));
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
                                      ctap_pub_key_cred_params_t *cred_params,
-                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk
-                              ,bool uv);
+                                     ctap_auth_data_t* auth_data,
+                                     ctap_resident_key_t *rk ,bool uv);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
                                     ctap_auth_data_header_t *auth_data, bool uv);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
-                             bool *should_cancel, mutex_t *should_cancel_mutex);
+                             bool (*should_cancel)(void));
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
-                          bool *should_cancel, mutex_t *should_cancel_mutex);
-static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex);
-static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex);
+                          bool (*should_cancel)(void));
+static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void));
+static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void));
 static uint8_t get_retries(CborEncoder *encoder);
-static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req);
+static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
+                             bool (*should_cancel)(void));
 static uint32_t get_auth_data_sign_count(uint32_t* auth_data_counter);
 static uint8_t key_agreement(CborEncoder *encoder);
 static void save_rk(ctap_resident_key_t *rk);
@@ -172,7 +173,7 @@ static void print_hex(uint8_t* data, size_t size)
 }
 
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
-                           bool *should_cancel, mutex_t *should_cancel_mutex)
+                           bool (*should_cancel)(void))
 {
     DEBUG("ctap handle request %u \n ", size);
 
@@ -196,16 +197,13 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             break;
         case CTAP_MAKE_CREDENTIAL:
             DEBUG("CTAP MAKE CREDENTIAL \n");
-            resp->status = make_credential(&encoder, size, req,
-                                           should_cancel, should_cancel_mutex);
-            DEBUG("make cred resp: ");
+            resp->status = make_credential(&encoder, size, req, should_cancel);
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_ASSERTION:
             DEBUG("CTAP GET_ASSERTION \n");
-            resp->status = get_assertion(&encoder, size, req, should_cancel,
-                                         should_cancel_mutex);
+            resp->status = get_assertion(&encoder, size, req, should_cancel);
             DEBUG("get assertion resp: ");
             print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
@@ -215,8 +213,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             break;
         case CTAP_CLIENT_PIN:
             DEBUG("CTAP CLIENT PIN \n");
-            resp->status = client_pin(&encoder, size,req, should_cancel,
-                                      should_cancel_mutex);
+            resp->status = client_pin(&encoder, size,req, should_cancel);
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
 #ifdef CTAP_TESTING
@@ -261,7 +258,7 @@ static uint8_t get_info(CborEncoder *encoder)
 
 /* CTAP specification (version 20190130) section 5.1 */
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
-                              bool *should_cancel, mutex_t *should_cancel_mutex)
+                              bool (*should_cancel)(void))
 {
     int ret;
     ctap_make_credential_req_t req;
@@ -296,14 +293,8 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
             req.options.up, req.options.uv);
 
     /* last moment where transaction can be cancelled */
-    mutex_lock(should_cancel_mutex);
-    if (*should_cancel) {
-        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
-    }
-    mutex_unlock(should_cancel_mutex);
-
-    if (ret != CTAP2_OK) {
-        return ret;
+    if (should_cancel()) {
+        return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
     ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk, uv);
@@ -325,7 +316,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
 /* CTAP specification (version 20190130) section 5.2 */
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
-                             bool *should_cancel, mutex_t *should_cancel_mutex)
+                             bool (*should_cancel)(void))
 {
     int ret;
     bool valid_found = false;
@@ -377,14 +368,8 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
     /* last moment where transaction can be cancelled */
-    mutex_lock(should_cancel_mutex);
-    if (*should_cancel) {
-        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
-    }
-    mutex_unlock(should_cancel_mutex);
-
-    if (ret != CTAP2_OK) {
-        return ret;
+    if (should_cancel()) {
+        return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
     ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv);
@@ -405,12 +390,10 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 
 /* CTAP specification (version 20190130) section 5.5 */
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
-                          bool *should_cancel, mutex_t *should_cancel_mutex)
+                          bool (*should_cancel)(void))
 {
     int ret;
     ctap_client_pin_req_t req;
-    (void)should_cancel;
-    (void)should_cancel_mutex;
 
     memset(&req, 0, sizeof(req));
 
@@ -433,13 +416,13 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
             ret = key_agreement(encoder);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_SET_PIN:
-            ret = set_pin(&req);
+            ret = set_pin(&req, should_cancel);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_CHANGE_PIN:
-            ret = change_pin(&req);
+            ret = change_pin(&req, should_cancel);
             break;
         case CTAP_CP_REQ_SUB_COMMAND_GET_PIN_TOKEN:
-            ret = get_pin_token(encoder, &req);
+            ret = get_pin_token(encoder, &req, should_cancel);
             break;
         default:
             DEBUG("Clientpin subcommand unknown command: %u \n", req.sub_command);
@@ -453,7 +436,7 @@ static uint8_t get_retries(CborEncoder *encoder)
     return cbor_helper_encode_retries(encoder, get_remaining_pin_attempts());
 }
 
-static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex)
+static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
 {
     sha256_context_t ctx;
     hmac_context_t ctx2;
@@ -501,6 +484,11 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex
         return ret;
     }
 
+    /* last moment where transaction can be cancelled */
+    if (should_cancel()) {
+        return CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+
     sha256_init(&ctx);
     sha256_update(&ctx, pin_hash_dec, 16);
     sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
@@ -538,19 +526,12 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex
         return CTAP2_ERR_PIN_POLICY_VIOLATION;
     }
 
-     /* last moment where transaction can be cancelled */
-    mutex_lock(should_cancel_mutex);
-    if (*should_cancel) {
-        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
-    }
-    mutex_unlock(should_cancel_mutex);
-
     ret = save_pin(new_pin_dec, (size_t)len);
 
     return CTAP2_OK;
 }
 
-static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t *should_cancel_mutex)
+static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
 {
     uint8_t shared_key[CTAP_KEY_LEN];
     uint8_t hmac[SHA256_DIGEST_LENGTH];
@@ -590,6 +571,12 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t 
         return ret;
     }
 
+    /* last moment where transaction can be cancelled */
+    if (should_cancel()) {
+        DEBUG("Client pin: cancelling request \n");
+        return CTAP2_ERR_KEEPALIVE_CANCEL;
+    }
+
     DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
 
     new_pin_dec_len = fmt_strnlen((char*)new_pin_dec, CTAP_PIN_MAX_SIZE);
@@ -597,19 +584,13 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool *should_cancel, mutex_t 
         return CTAP2_ERR_PIN_POLICY_VIOLATION;
     }
 
-     /* last moment where transaction can be cancelled */
-    mutex_lock(should_cancel_mutex);
-    if (*should_cancel) {
-        ret = CTAP2_ERR_KEEPALIVE_CANCEL;
-    }
-    mutex_unlock(should_cancel_mutex);
-
     ret = save_pin(new_pin_dec, (size_t)new_pin_dec_len);
 
     return CTAP2_OK;
 }
 
-static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
+static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
+                             bool (*should_cancel)(void))
 {
     sha256_context_t ctx;
     uint8_t shared_key[CTAP_KEY_LEN];
@@ -639,6 +620,11 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req)
     if (ret != CTAP2_OK) {
         DEBUG("set pin: error while decrypting pin hash \n");
         return ret;
+    }
+
+    /* last moment where transaction can be cancelled */
+    if (should_cancel()) {
+        return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
     DEBUG("Pin hash: ");
@@ -794,8 +780,11 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth
     return CTAP2_OK;
 }
 
-static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user, ctap_pub_key_cred_params_t *cred_params,
-                              ctap_auth_data_t* auth_data, ctap_resident_key_t *rk, bool uv)
+static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
+                                    ctap_pub_key_cred_params_t *cred_params,
+                                    ctap_auth_data_t* auth_data,
+                                    ctap_resident_key_t *rk,
+                                    bool uv)
 {
     int ret;
     uint32_t counter = 0;

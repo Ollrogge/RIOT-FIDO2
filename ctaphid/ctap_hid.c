@@ -93,6 +93,18 @@ static void reset_ctap_buffer(void)
     memset(&ctap_buffer, 0, sizeof(ctap_buffer));
 }
 
+static bool should_cancel(void)
+{
+    bool ret;
+    mutex_lock(&ctap_buffer.should_cancel_mutex);
+    ret = ctap_buffer.should_cancel;
+    mutex_unlock(&ctap_buffer.should_cancel_mutex);
+
+    DEBUG("Should cancel: %d \n", ret);
+
+    return ret;
+}
+
 static void check_timeouts(void)
 {
     uint64_t now = xtimer_now_usec64();
@@ -318,7 +330,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
         }
     }
     else {
-        /* first init packet received, starts a transaction */
+        /* first init packet received starts a transaction */
         if (is_init_type_pkt(pkt)) {
             is_busy = true;
             status = buffer_pkt(pkt);
@@ -369,7 +381,6 @@ static void* pkt_worker(void* arg)
 {
     (void) arg;
 
-     /* init crypto stuff */
     ctap_init();
 
     while (1) {
@@ -398,6 +409,7 @@ static void* pkt_worker(void* arg)
             else {
                 switch(cmd) {
                     case CTAP_HID_COMMAND_MSG:
+                        /* not implemented */
                         DEBUG("CTAP_HID: MSG COMMAND \n");
                         send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
                         break;
@@ -413,7 +425,14 @@ static void* pkt_worker(void* arg)
                         DEBUG("CTAP_HID: PING \n");
                         ctap_hid_write(cmd, cid, buf, bcnt);
                         break;
+                    case CTAP_HID_COMMAND_CANCEL:
+                        /*
+                         * no transaction is currently being processed,
+                         * no reason to send cancel
+                         */
+                        break;
                     default:
+                        send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
                         DEBUG("Ctaphid: unknown command %u \n", cmd);
                 }
             }
@@ -515,8 +534,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     }
 
     memset(&resp, 0, sizeof(ctap_resp_t));
-    size = ctap_handle_request(payload, bcnt, &resp, &ctap_buffer.should_cancel,
-                               &ctap_buffer.should_cancel_mutex);
+    size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
 
     DEBUG("CTAPHID CBOR BYTES TO SENT: %u %u\n", size, resp.status);
 

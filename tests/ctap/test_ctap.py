@@ -1,4 +1,4 @@
-from fido2.hid import CtapHidDevice, CAPABILITY
+from fido2.hid import *
 from fido2.ctap2 import CTAP2, PinProtocolV1, AttestationObject, AttestedCredentialData, CtapError
 from fido2.attestation import Attestation
 from fido2.client import Fido2Client
@@ -6,12 +6,25 @@ from fido2.server import Fido2Server
 from getpass import getpass
 from binascii import a2b_hex
 from hashlib import sha256
+import threading
+from time import sleep
 
 import unittest
 
 dev = None
 
-RP_ID = "example.com"
+def send_init_packet(dev, cmd, payload_size=0, payload=b""):
+    _dev = dev._dev
+    max_payload = _dev.packet_size - 7
+    frame = payload[:max_payload]
+    packet = hidtransport.UsbHidTransport.InitPacket(_dev.packet_size, _dev.cid, cmd,
+             payload_size, frame)
+
+    _dev.InternalSendPacket(packet)
+    status, resp = _dev.InternalRecv()
+    status ^= TYPE_INIT
+    if status == CTAPHID.ERROR:
+        raise CtapError(resp[0])
 
 def get_device():
     devs = list(CtapHidDevice.list_devices())
@@ -44,6 +57,35 @@ class TestCtap(unittest.TestCase):
             print("Device does not support CBOR")
 
         dev.close()
+
+    #@unittest.skip
+    #todo: use this test only with user presence test, else it will probably fail quite often
+    def test_cancel(self):
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        def send_cancel(dev):
+            sleep(0.25)
+            cmd = (TYPE_INIT | CTAPHID.CANCEL)
+            send_init_packet(dev, cmd)
+            print("1")
+
+        ctap = CTAP2(dev)
+        pin = PinProtocolV1(ctap)
+        PIN ="12345"
+
+        # reset state so we can set pin without error
+        ctap.reset()
+        t = threading.Thread(target=send_cancel, args=(dev,))
+        t.start()
+        try:
+            pin.set_pin(PIN)
+            print("2")
+        except CtapError as e:
+            self.assertEqual(e.code, CtapError.ERR.KEEPALIVE_CANCEL)
 
     @unittest.skip
     def test_pin(self):
@@ -154,7 +196,7 @@ class TestCtap(unittest.TestCase):
         print("Credential authenticated!")
 
 
-    #@unittest.skip
+    @unittest.skip
     def test_make_credential_and_get_assertion_PIN(self):
         print()
         print("*** test_make_credential_and_get_assertion with PIN***")
