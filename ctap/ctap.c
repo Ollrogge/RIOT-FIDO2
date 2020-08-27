@@ -22,6 +22,8 @@
 
 #include "rijndael-api-fst.h"
 
+#include "periph/gpio.h"
+
 #define CTAP_TESTING 1
 
 static uint8_t get_info(CborEncoder *encoder);
@@ -32,7 +34,8 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
                                      ctap_auth_data_t* auth_data,
                                      ctap_resident_key_t *rk ,bool uv);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
-                                    ctap_auth_data_header_t *auth_data, bool uv);
+                                    ctap_auth_data_header_t *auth_data, bool uv,
+                                    bool up);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                              bool (*should_cancel)(void));
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
@@ -56,10 +59,15 @@ static uint8_t decrement_pin_attempts(void);
 static void reset_pin_attempts(void);
 static void reset(void);
 static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len);
+static bool locked(void);
+static bool boot_locked(void);
+static uint8_t user_presence_test(void);
+static void gpio_cb(void *arg);
 
 static ctap_state_t g_state;
 static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
-static uint8_t g_rem_pin_att_boot;
+static uint8_t g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
+static bool g_user_present = false;
 
 void ctap_init(void)
 {
@@ -77,8 +85,6 @@ void ctap_init(void)
 
         save_state(&g_state);
     }
-
-    g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
 
     /* todo: what to do if init fails? */
     ret = ctap_crypto_init();
@@ -98,9 +104,80 @@ static void reset(void)
     save_state(&g_state);
 }
 
+static void gpio_cb(void *arg)
+{
+    (void)arg;
+
+    g_user_present = true;
+}
+
+static uint8_t user_presence_test(void)
+{
+#ifdef BTN0_PIN
+    uint8_t ret;
+    uint32_t start;
+    uint32_t diff = 0;
+    uint32_t delay = (500 * US_PER_MS);
+
+    ctap_hid_send_keepalive(CTAP_HID_STATUS_UPNEEDED);
+
+    if (gpio_init_int(BTN0_PIN, BTN0_MODE, GPIO_FALLING, gpio_cb, NULL) < 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    start = xtimer_now_usec();
+
+    while (!g_user_present && diff < CTAP_UP_TIMEOUT) {
+#ifdef LED0_TOGGLE
+        LED0_TOGGLE;
+#endif
+#ifdef LED1_TOGGLE
+        LED1_TOGGLE;
+#endif
+#ifdef LED3_TOGGLE
+        LED3_TOGGLE;
+#endif
+#ifdef LED2_TOGGLE
+        LED2_TOGGLE;
+#endif
+        xtimer_usleep(delay);
+
+        diff = xtimer_now_usec() - start;
+    }
+
+    ret = g_user_present ? CTAP2_OK : CTAP2_ERR_ACTION_TIMEOUT;
+    gpio_irq_disable(BTN0_PIN);
+    g_user_present = false;
+    return ret;
+#else
+    return CTAP1_ERR_OTHER;
+#endif
+}
+
+bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type)
+{
+    if (cred_type == CTAP_PUB_KEY_CRED_PUB_KEY) {
+        if (alg_type == CTAP_COSE_ALG_ES256) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool pin_is_set(void)
 {
     return g_state.pin_is_set;
+}
+
+static bool locked(void)
+{
+    return g_state.rem_pin_att == 0;
+}
+
+static bool boot_locked(void)
+{
+    return g_state.rem_pin_att_boot == 0;
 }
 
 static uint8_t decrement_pin_attempts(void)
@@ -178,13 +255,12 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
     DEBUG("ctap handle request %u \n ", size);
 
     CborEncoder encoder;
-    memset(&encoder, 0, sizeof(CborEncoder));
-
     uint8_t cmd = *req;
+    uint8_t* buf = resp->data;
     req++;
     size--;
 
-    uint8_t* buf = resp->data;
+    memset(&encoder, 0, sizeof(CborEncoder));
 
     cbor_encoder_init(&encoder, buf, CTAP_MAX_MSG_SIZE, 0);
 
@@ -224,6 +300,8 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
 #endif
         default:
             DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
+            resp->status = CTAP1_ERR_INVALID_COMMAND;
+            return 0;
             break;
     }
 
@@ -265,6 +343,14 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     ctap_auth_data_t auth_data;
     ctap_resident_key_t rk;
     bool uv = false;
+
+    if (locked()) {
+        return  CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    if (boot_locked()) {
+        return CTAP2_ERR_PIN_AUTH_BLOCKED;
+    }
 
     memset(&req, 0, sizeof(req));
 
@@ -320,12 +406,20 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 {
     int ret;
     bool valid_found = false;
-    bool uv = false;
+    bool uv = false, up = false;
     uint8_t valid_count = 0;
     ctap_get_assertion_req_t req;
     ctap_resident_key_t rk;
     ctap_auth_data_header_t auth_data;
     ctap_cred_desc_t cred_desc;
+
+    if (locked()) {
+        return  CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    if (boot_locked()) {
+        return CTAP2_ERR_PIN_AUTH_BLOCKED;
+    }
 
     memset(&req, 0, sizeof(req));
 
@@ -348,10 +442,6 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
     }
 
-    if (!valid_found) {
-        return CTAP2_ERR_NO_CREDENTIALS;
-    }
-
     if (pin_is_set() && !req.pin_auth_present) {
         uv = false;
     }
@@ -367,12 +457,25 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         uv = true;
     }
 
+     /* todo: add macro to disable user presence test*/
+    if (user_presence_test() == CTAP2_OK) {
+        up = true;
+    }
+
+    if (!valid_found) {
+        return CTAP2_ERR_NO_CREDENTIALS;
+    }
+
+    if (req.options.uv) {
+        return CTAP2_ERR_UNSUPPORTED_OPTION;
+    }
+
     /* last moment where transaction can be cancelled */
     if (should_cancel()) {
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
-    ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv);
+    ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv, up);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -394,6 +497,14 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
 {
     int ret;
     ctap_client_pin_req_t req;
+
+    if (locked()) {
+        return CTAP2_ERR_PIN_BLOCKED;
+    }
+
+    if (boot_locked()) {
+        return CTAP2_ERR_PIN_AUTH_BLOCKED;
+    }
 
     memset(&req, 0, sizeof(req));
 
@@ -758,7 +869,9 @@ static void load_state(ctap_state_t *state)
     memmove(state, page, sizeof(*state));
 }
 
-static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth_data_header_t *auth_data, bool uv)
+static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len,
+                                    ctap_auth_data_header_t *auth_data, bool uv,
+                                    bool up)
 {
     memset(auth_data, 0, sizeof(*auth_data));
 
@@ -770,8 +883,9 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len, ctap_auth
     get_auth_data_sign_count(&counter);
     auth_data->counter = counter;
 
-    /* todo: faking user presence for now */
-    auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;
+    if (up) {
+        auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;
+    }
 
     if (uv) {
         auth_data->flags |= CTAP_AUTH_DATA_FLAG_UV;

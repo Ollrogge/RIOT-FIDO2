@@ -191,6 +191,11 @@ extern "C" {
 #define CTAP_KEY_LEN 32
 
 /**
+ * @brief Timeout for user presence test
+ */
+#define CTAP_UP_TIMEOUT (3 * US_PER_SEC)
+
+/**
  * @name CTAP version strings
  *
  * @{
@@ -665,6 +670,16 @@ void ctap_init(void);
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
                             ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len);
 
+
+/**
+ * @brief Check if requested algorithm is supported
+ *
+ * @param[in] cred_type    type of credential
+ * @param[in] alg_type     cryptographic algorithm identifier
+ *
+ * @return CTAP status code
+ */
+bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type);
 
 #ifdef __cplusplus
 }

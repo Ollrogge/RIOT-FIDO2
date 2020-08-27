@@ -21,22 +21,6 @@ static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t *len);
 static uint8_t parse_text_string(CborValue *it, char* dst, size_t* len);
 static uint8_t parse_int(CborValue *it, int *num);
 
-static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type);
-
-static uint8_t cred_params_supported(uint8_t cred_type, int32_t alg_type)
-{
-    DEBUG("cred_params_supported cred_type: %u alg_type: %ld \n", cred_type, alg_type);
-
-    if (cred_type == CTAP_PUB_KEY_CRED_PUB_KEY) {
-
-        if (alg_type == CTAP_COSE_ALG_ES256) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
 /* CTAP specification (version 20190130) section 5.4 */
 uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
 {
@@ -997,7 +981,7 @@ static uint8_t parse_pub_key_cred_params(CborValue *it, ctap_pub_key_cred_params
             return ret;
         }
 
-        if (cred_params_supported(cred_type, alg_type)) {
+        if (ctap_cred_params_supported(cred_type, alg_type)) {
             params->cred_type = cred_type;
             params->alg_type = alg_type;
             return CTAP2_OK;

@@ -58,7 +58,7 @@ class TestCtap(unittest.TestCase):
 
         dev.close()
 
-    #@unittest.skip
+    @unittest.skip
     #todo: use this test only with user presence test, else it will probably fail quite often
     def test_cancel(self):
         try:
@@ -144,10 +144,10 @@ class TestCtap(unittest.TestCase):
         else:
             print("Device does not support CBOR")
 
-    @unittest.skip
+    #@unittest.skip
     def test_make_credential_and_get_assertion(self):
         print()
-        print("*** test_make_credential_and_get_assertion with PIN***")
+        print("*** test_make_credential_and_get_assertion ***")
         try:
             dev = get_device()
         except Exception:
