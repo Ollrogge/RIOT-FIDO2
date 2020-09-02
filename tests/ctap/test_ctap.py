@@ -31,6 +31,32 @@ def get_device():
     assert len(devs) == 1
     return devs[0]
 
+def make_credential(server, client, user):
+    create_options, state = server.register_begin(user)
+
+    attestation_object, client_data = client.make_credential(
+        create_options["publicKey"])
+
+    auth_data = server.register_complete(state, client_data, attestation_object)
+    credential = [auth_data.credential_data]
+
+    return credential
+
+def authenticate(server, client, credential):
+
+    request_options, state = server.authenticate_begin(credential)
+
+    assertions, client_data = client.get_assertion(request_options["publicKey"])
+    assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
+    server.authenticate_complete(
+        state,
+        credential,
+        assertion.credential["id"],
+        client_data,
+        assertion.auth_data,
+        assertion.signature,
+    )
+
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestCtap(unittest.TestCase):
     @unittest.skip
@@ -125,6 +151,7 @@ class TestCtap(unittest.TestCase):
 
             pin1.change_pin(PIN, PIN2)
 
+            #try to get pin_token with old PIN
             try:
                 resp = pin1.get_pin_token(PIN)
             except CtapError as e:
@@ -144,7 +171,42 @@ class TestCtap(unittest.TestCase):
         else:
             print("Device does not support CBOR")
 
-    #@unittest.skip
+     #@unittest.skip
+     #test with different RP's for now. Gext next assertion will be needed if 2 credentials found for 1 rp.
+    def test_make_credential_and_get_assertion_multiple_users(self):
+        print()
+        print("*** test_make_credential_and_get_assertion_multiple_users ***")
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        ctap = CTAP2(dev)
+
+        # reset state
+        ctap.reset()
+
+        client = Fido2Client(dev, "https://example.com")
+
+        server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
+        user1 = {"id": b"user_id1", "name": "A. User"}
+        user2 = {"id": b"user_id2", "name": "A. User"}
+
+        credential1 = make_credential(server, client, user1)
+        print("User1 credential created")
+
+        credential2 = make_credential(server, client, user2)
+        print("User2 credential created")
+
+        authenticate(server, client, credential1)
+        print("Credential1 authenticated!")
+
+        authenticate(server, client, credential2)
+        print("Credential2 authenticated!")
+
+
+    @unittest.skip
     def test_make_credential_and_get_assertion(self):
         print()
         print("*** test_make_credential_and_get_assertion ***")
@@ -155,9 +217,8 @@ class TestCtap(unittest.TestCase):
             return
 
         ctap = CTAP2(dev)
-        pin1 = PinProtocolV1(ctap)
 
-        # reset state so we can set pin without error
+        # reset state
         ctap.reset()
 
         client = Fido2Client(dev, "https://example.com")
@@ -165,41 +226,17 @@ class TestCtap(unittest.TestCase):
         server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
         user = {"id": b"user_id", "name": "A. User"}
 
-         # Prepare parameters for makeCredential
-        create_options, state = server.register_begin(user)
-
-        attestation_object, client_data = client.make_credential(
-            create_options["publicKey"])
-
-        # Complete registration
-        auth_data = server.register_complete(state, client_data, attestation_object)
-        credentials = [auth_data.credential_data]
-
+        credential = make_credential(server, client, user)
         print("New credential created!")
 
-        # Prepare parameters for getAssertion
-        request_options, state = server.authenticate_begin(credentials)
-
-        assertions, client_data = client.get_assertion(request_options["publicKey"])
-        assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
-
-        # Complete authenticator
-        server.authenticate_complete(
-            state,
-            credentials,
-            assertion.credential["id"],
-            client_data,
-            assertion.auth_data,
-            assertion.signature,
-        )
-
+        authenticate(server, client, credential)
         print("Credential authenticated!")
 
 
     @unittest.skip
     def test_make_credential_and_get_assertion_PIN(self):
         print()
-        print("*** test_make_credential_and_get_assertion with PIN***")
+        print("*** test_make_credential_and_get_assertion with PIN ***")
         try:
             dev = get_device()
         except Exception:

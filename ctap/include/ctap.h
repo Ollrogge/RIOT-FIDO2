@@ -191,6 +191,17 @@ extern "C" {
 #define CTAP_KEY_LEN 32
 
 /**
+ * @brief Start page for storing resident keys
+ */
+#define CTAP_RK_START_PAGE 26U
+
+/**
+ * @brief Max amount of resident keys we can store
+ */
+#define CTAP_MAX_RK (((FLASHPAGE_NUMOF - CTAP_RK_START_PAGE) * FLASHPAGE_SIZE) /  \
+                    sizeof(ctap_resident_key_t))
+
+/**
  * @brief Timeout for user presence test
  */
 #define CTAP_UP_TIMEOUT (3 * US_PER_SEC)
@@ -405,6 +416,11 @@ extern "C" {
 #define CTAP_INITIALIZED_MARKER 0x4e
 
 /**
+ * @brief max size of allow list
+ */
+#define CTAP_MAX_ALLOW_LIST_SIZE 0x10
+
+/**
  * @brief CTAP resp struct forward declaration
  */
 typedef struct ctap_resp ctap_resp_t;
@@ -569,7 +585,7 @@ typedef struct __attribute__((packed))
 {
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     uint8_t flags;
-    uint32_t counter;
+    uint32_t sign_count;
 } ctap_auth_data_header_t;
 
 /**
@@ -593,6 +609,7 @@ struct __attribute__((packed)) ctap_resident_key
     uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
     uint8_t user_id_len;
     uint8_t priv_key[32];
+    uint32_t sign_count;
 };
 
 /**
@@ -625,6 +642,7 @@ typedef struct
     uint8_t rem_pin_att_boot; /**< remaining PIN attempts for this power cycle */
     uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
     uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
+    uint16_t rk_amount_stored; /**< total number of resident keys stored on device */
 } ctap_state_t;
 
 typedef struct
