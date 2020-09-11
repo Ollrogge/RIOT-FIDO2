@@ -42,15 +42,15 @@ def make_credential(server, client, user):
 
     return credential
 
-def authenticate(server, client, credential):
+def authenticate(server, client, credentials):
 
-    request_options, state = server.authenticate_begin(credential)
+    request_options, state = server.authenticate_begin(credentials)
 
     assertions, client_data = client.get_assertion(request_options["publicKey"])
     assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
     server.authenticate_complete(
         state,
-        credential,
+        credentials,
         assertion.credential["id"],
         client_data,
         assertion.auth_data,
@@ -171,8 +171,38 @@ class TestCtap(unittest.TestCase):
         else:
             print("Device does not support CBOR")
 
-     #@unittest.skip
-     #test with different RP's for now. Gext next assertion will be needed if 2 credentials found for 1 rp.
+    #@unittest.skip
+    def test_get_next_assertion(self):
+        print()
+        print("*** test_get_next_assertion ***")
+        try:
+            dev = get_device()
+        except Exception:
+            self.fail("Unable to find hid device")
+            return
+
+        ctap = CTAP2(dev)
+
+        # reset state
+        ctap.reset()
+
+        client = Fido2Client(dev, "https://example.com")
+
+        server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
+        user1 = {"id": b"user_id1", "name": "A. User"}
+        user2 = {"id": b"user_id2", "name": "A. User"}
+
+        credential1 = make_credential(server, client, user1)[0]
+        print("User1 credential created")
+
+        credential2 = make_credential(server, client, user2)[0]
+        print("User2 credential created")
+
+        authenticate(server, client, [credential1, credential2])
+        print("Credentials authenticated !")
+
+
+    @unittest.skip
     def test_make_credential_and_get_assertion_multiple_users(self):
         print()
         print("*** test_make_credential_and_get_assertion_multiple_users ***")

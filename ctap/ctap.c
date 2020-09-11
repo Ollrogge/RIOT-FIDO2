@@ -3,27 +3,18 @@
 #include "debug.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "fmt.h"
-
 #include "ctap.h"
-
 #include "ctap_hid.h"
-
 #include "cbor_helper.h"
-
 #include "ctap_crypto.h"
-
 #include "xtimer.h"
-
 #include "periph/flashpage.h"
-
 #include "relic.h"
-
 #include "rijndael-api-fst.h"
-
 #include "byteorder.h"
-
 #include "periph/gpio.h"
 
 #define CTAP_TESTING 1
@@ -38,8 +29,13 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
                                     ctap_auth_data_header_t *auth_data, bool uv,
                                     bool up, uint32_t sign_count);
+static uint8_t make_auth_data_next_assert(uint8_t *rp_id_hash,
+                                         ctap_auth_data_header_t *auth_data,
+                                         bool uv, bool up, uint32_t sign_count);
 static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                              bool (*should_cancel)(void));
+static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
+                                  uint8_t *req_raw);
 static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
                           bool (*should_cancel)(void));
 static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void));
@@ -63,11 +59,14 @@ static bool locked(void);
 static bool boot_locked(void);
 static uint8_t user_presence_test(void);
 static void gpio_cb(void *arg);
-static uint16_t find_matching_rk(ctap_resident_key_t *rk, ctap_cred_desc_t *allow_list,
-                          size_t allow_list_len, uint8_t* rp_id, size_t rp_id_len);
+static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
+                                ctap_cred_desc_t *allow_list,size_t allow_list_len,
+                                uint8_t* rp_id, size_t rp_id_len);
+static int cred_cmp(const void *a, const void *b);
 static bool rks_are_equal(ctap_resident_key_t *rk1, ctap_resident_key_t *rk2);
 
 static ctap_state_t g_state;
+static ctap_get_assertion_state_t g_assert_state;
 static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
 static uint8_t g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
 static bool g_user_present = false;
@@ -75,7 +74,7 @@ static bool g_user_present = false;
 void ctap_init(void)
 {
     int ret;
-    (void)ret;
+    (void) ret;
 
     load_state(&g_state);
 
@@ -283,6 +282,8 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             break;
         case CTAP_GET_NEXT_ASSERTION:
             DEBUG("CTAP GET NEXT ASSERTION \n");
+            resp->status = get_next_assertion(&encoder, size, req);
+            return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_CLIENT_PIN:
             DEBUG("CTAP CLIENT PIN \n");
@@ -394,24 +395,24 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
     save_rk(&rk);
 
-
     return CTAP2_OK;
 }
 
 /* find most recent rk matching rp_id_hash and present in allow_list */
-static uint16_t find_matching_rk(ctap_resident_key_t *rk, ctap_cred_desc_t *allow_list,
-                          size_t allow_list_len, uint8_t* rp_id, size_t rp_id_len)
+static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
+                                ctap_cred_desc_t *allow_list,size_t allow_list_len,
+                                uint8_t *rp_id, size_t rp_id_len)
 {
-    uint16_t found = 0;
+    uint8_t index = 0;
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     ctap_resident_key_t rk_temp;
-
-    size_t index_min_count = 0;
-    uint32_t min_count = 0xffffffff;
 
     sha256(rp_id, rp_id_len, rp_id_hash);
 
     for (uint16_t i = 0; i < g_state.rk_amount_stored; i++) {
+        if (index >= rks_len) {
+            break;
+        }
         memset(&rk_temp, 0, sizeof(rk_temp));
         load_rk(i, &rk_temp);
 
@@ -423,33 +424,34 @@ static uint16_t find_matching_rk(ctap_resident_key_t *rk, ctap_cred_desc_t *allo
                 for (size_t j = 0; j < allow_list_len; j++) {
                     if (memcmp(allow_list[j].cred_id, rk_temp.cred_desc.cred_id,
                         sizeof(allow_list[j].cred_id)) == 0) {
+                            memmove(&rks[index], &rk_temp, sizeof(rks[index]));
 
-                            if (rk_temp.sign_count < min_count) {
-                                index_min_count = i;
-                                min_count = rk_temp.sign_count;
-                            }
-                            found++;
+                            index++;
                             break;
                     }
                 }
             }
             else {
-                if (rk_temp.sign_count < min_count) {
-                    index_min_count = i;
-                    min_count = rk_temp.sign_count;
-                }
-                found++;
+                memmove(&rks[index], &rk_temp, sizeof(rks[index]));
+                index++;
             }
         }
     }
 
-    if (found) {
-        load_rk(index_min_count, rk);
-    }
+    DEBUG("FIND MATCHING RK: %u %u \n", index, allow_list_len);
 
-    DEBUG("FIND MATCHING RK: %u %lu\n", found, min_count);
+    /* sort ascending order based on sign count */
+    qsort(rks, index + 1, sizeof(ctap_resident_key_t), cred_cmp);
 
-    return found;
+    return index + 1;
+}
+
+static int cred_cmp(const void *a, const void *b)
+{
+    ctap_resident_key_t *rk_a = (ctap_resident_key_t *)a;
+    ctap_resident_key_t *rk_b = (ctap_resident_key_t *)b;
+
+    return rk_a->sign_count - rk_b->sign_count;
 }
 
 /* CTAP specification (version 20190130) section 5.2 */
@@ -458,9 +460,8 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
 {
     int ret;
     bool uv = false, up = false;
-    uint16_t valid_count = 0;
     ctap_get_assertion_req_t req;
-    ctap_resident_key_t rk;
+    ctap_resident_key_t *rk;
     ctap_auth_data_header_t auth_data;
     ctap_cred_desc_t allow_list[CTAP_MAX_ALLOW_LIST_SIZE];
 
@@ -472,6 +473,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return CTAP2_ERR_PIN_AUTH_BLOCKED;
     }
 
+    memset(&g_assert_state, 0, sizeof(g_assert_state));
     memset(&req, 0, sizeof(req));
 
     ret = cbor_helper_parse_get_assertion_req(&req, size, req_raw);
@@ -492,9 +494,10 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
     }
 
-    valid_count = find_matching_rk(&rk, allow_list, req.allow_list_len,
-                                    req.rp_id, req.rp_id_len);
-
+    g_assert_state.count = find_matching_rks(
+                            (ctap_resident_key_t*)&g_assert_state.rks,
+                            sizeof(g_assert_state.rks), allow_list,
+                            req.allow_list_len, req.rp_id, req.rp_id_len);
 
     if (pin_is_set() && !req.pin_auth_present) {
         uv = false;
@@ -516,9 +519,14 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         up = true;
     }
 
-    if (!valid_count) {
+    if (!g_assert_state.count) {
         return CTAP2_ERR_NO_CREDENTIALS;
     }
+
+    memmove(g_assert_state.client_data_hash, req.client_data_hash,
+            sizeof(g_assert_state.client_data_hash));
+
+    rk = &g_assert_state.rks[0];
 
     if (req.options.uv) {
         return CTAP2_ERR_UNSUPPORTED_OPTION;
@@ -530,21 +538,62 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
     ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv, up,
-                                rk.sign_count);
+                                rk->sign_count);
+
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
     ret = cbor_helper_encode_assertion_object(encoder, &auth_data, req.client_data_hash,
-                                              &rk, valid_count);
+                                              rk, g_assert_state.count);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
     /* webauthn specification (version 20190304) section 6.1.1 */
-    rk.sign_count++;
+    rk->sign_count++;
+    save_rk(rk);
+
+    return CTAP2_OK;
+}
+
+static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
+                                  uint8_t *req_raw)
+{
+    (void)size;
+    (void)req_raw;
+
+    int ret;
+    ctap_auth_data_header_t auth_data;
+
+    if (g_assert_state.cred_counter >= g_assert_state.count) {
+        return CTAP2_ERR_NOT_ALLOWED;
+    }
+
+    ctap_resident_key_t *rk = &g_assert_state.rks[g_assert_state.cred_counter];
+    g_assert_state.cred_counter++;
+
+    ret = make_auth_data_next_assert(rk->rp_id_hash, &auth_data,
+                                    g_assert_state.uv, g_assert_state.up,
+                                    rk->sign_count);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    /* cred count set to 0 because omitted when get_next_assertion */
+    ret = cbor_helper_encode_assertion_object(encoder, &auth_data,
+                    g_assert_state.client_data_hash, rk, 0);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    /* webauthn specification (version 20190304) section 6.1.1 */
+    rk->sign_count++;
+    save_rk(rk);
 
     return CTAP2_OK;
 }
@@ -885,8 +934,6 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk_temp;
 
-    DEBUG("MAX AMOUNT WE CAN STORE %u %u \n", CTAP_MAX_RK, sizeof(*rk));
-
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
         return CTAP2_ERR_KEY_STORE_FULL;
     }
@@ -974,6 +1021,26 @@ static uint8_t make_auth_data_assert(uint8_t *rp_id, size_t rp_id_len,
 
     /* sign_count to network byte order */
     auth_data->sign_count = htonl(sign_count);
+
+    if (up) {
+        auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;
+    }
+
+    if (uv) {
+        auth_data->flags |= CTAP_AUTH_DATA_FLAG_UV;
+    }
+
+    return CTAP2_OK;
+}
+
+static uint8_t make_auth_data_next_assert(uint8_t *rp_id_hash,
+                                         ctap_auth_data_header_t *auth_data,
+                                         bool uv, bool up, uint32_t sign_count)
+{
+    memset(auth_data, 0, sizeof(*auth_data));
+    auth_data->sign_count = htonl(sign_count);
+
+    memmove(auth_data->rp_id_hash, rp_id_hash, sizeof(auth_data->rp_id_hash));
 
     if (up) {
         auth_data->flags |= CTAP_AUTH_DATA_FLAG_UP;

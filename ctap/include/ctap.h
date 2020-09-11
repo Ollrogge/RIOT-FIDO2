@@ -500,6 +500,39 @@ typedef struct
 } ctap_rp_ent_t;
 
 /**
+ * @brief CTAP cose key struct
+ *
+ * https://www.iana.org/assignments/cose/cose.xhtml
+ */
+typedef struct
+{
+    struct {
+        uint8_t x[32];
+        uint8_t y[32];
+    } pubkey;
+
+    int kty;             /**< identification of key type */
+    int crv;             /**< EC identifier */
+    int32_t alg_type;    /**< COSEAlgorithmIdentifier */
+    uint8_t cred_type;  /**< type of credential */
+} ctap_cose_key_t;
+
+/**
+ * @brief CTAP resident key struct
+ *
+ *  https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source
+ */
+struct __attribute__((packed)) ctap_resident_key
+{
+    ctap_cred_desc_t cred_desc;
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
+    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
+    uint8_t user_id_len;
+    uint8_t priv_key[32];
+    uint32_t sign_count;
+};
+
+/**
  * @brief CTAP make credential request struct
  *
  */
@@ -536,22 +569,39 @@ typedef struct
 } ctap_get_assertion_req_t;
 
 /**
- * @brief CTAP cose key struct
+ * @brief CTAP client pin request struct
  *
- * https://www.iana.org/assignments/cose/cose.xhtml
  */
 typedef struct
 {
-    struct {
-        uint8_t x[32];
-        uint8_t y[32];
-    } pubkey;
+    uint8_t pin_protocol; /**< PIN protocol version chosen by the client */
+    uint8_t sub_command; /**< authenticator Client PIN sub command */
+    ctap_cose_key_t key_agreement; /**< public key of platform_key_agreement_key*/
+    bool key_agreement_present;
+    uint8_t pin_auth[16]; /**< first 16 bytes of HMAC-SHA-256 of encrypted contents  */
+    bool pin_auth_present;
+    uint8_t new_pin_enc[256]; /**< Encrypted new PIN using sharedSecret. */
+    uint16_t new_pin_enc_size;
+    uint8_t pin_hash_enc[16]; /**< Encrypted first 16 bytes of SHA-256 of PIN using sharedSecret. */
+    bool pin_hash_enc_present;
+} ctap_client_pin_req_t;
 
-    int kty;             /**< identification of key type */
-    int crv;             /**< EC identifier */
-    int32_t alg_type;    /**< COSEAlgorithmIdentifier */
-    uint8_t cred_type;  /**< type of credential */
-} ctap_cose_key_t;
+/**
+ * @brief CTAP get_assertion state
+ *
+ */
+typedef struct
+{
+    ctap_resident_key_t rks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate
+    credentials found */
+    uint8_t count; /**< total number of rks found  */
+    uint8_t cred_counter; /**< amount of creds sent to host  */
+    uint32_t timer; /**< time gap between get_next_assertion calls  */
+    bool uv; /**< user verified */
+    bool up; /**< user present */
+    uint8_t client_data_hash[SHA256_DIGEST_LENGTH]; /**< SHA-256 hash of JSON serialized client data */
+
+} ctap_get_assertion_state_t;
 
 /**
  * @brief CTAP attested credential data header struct
@@ -596,39 +646,6 @@ typedef struct
     ctap_auth_data_header_t header;
     ctap_attested_cred_data_t attested_cred_data;
 } ctap_auth_data_t;
-
-/**
- * @brief CTAP resident key struct
- *
- *  https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source
- */
-struct __attribute__((packed)) ctap_resident_key
-{
-    ctap_cred_desc_t cred_desc;
-    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
-    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
-    uint8_t user_id_len;
-    uint8_t priv_key[32];
-    uint32_t sign_count;
-};
-
-/**
- * @brief CTAP client pin request struct
- *
- */
-typedef struct
-{
-    uint8_t pin_protocol; /**< PIN protocol version chosen by the client */
-    uint8_t sub_command; /**< authenticator Client PIN sub command */
-    ctap_cose_key_t key_agreement; /**< public key of platform_key_agreement_key*/
-    bool key_agreement_present;
-    uint8_t pin_auth[16]; /**< first 16 bytes of HMAC-SHA-256 of encrypted contents  */
-    bool pin_auth_present;
-    uint8_t new_pin_enc[256]; /**< Encrypted new PIN using sharedSecret. */
-    uint16_t new_pin_enc_size;
-    uint8_t pin_hash_enc[16]; /**< Encrypted first 16 bytes of SHA-256 of PIN using sharedSecret. */
-    bool pin_hash_enc_present;
-} ctap_client_pin_req_t;
 
 /**
  * @brief General state of CTAP stored in flash memory
