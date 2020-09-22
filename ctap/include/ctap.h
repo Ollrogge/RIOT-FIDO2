@@ -207,6 +207,12 @@ extern "C" {
 #define CTAP_UP_TIMEOUT (3 * US_PER_SEC)
 
 /**
+ * @brief Max time between call to get_assertion /
+ * get_next_assertion
+ */
+#define CTAP_GET_NEXT_ASSERTION_TIMEOUT (30 * US_PER_SEC)
+
+/**
  * @name CTAP version strings
  *
  * @{
@@ -594,8 +600,8 @@ typedef struct
 {
     ctap_resident_key_t rks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate
     credentials found */
-    uint8_t count; /**< total number of rks found  */
-    uint8_t cred_counter; /**< amount of creds sent to host  */
+    uint8_t count; /**< number of rks found  */
+    uint8_t cred_counter; /**< amount of creds sent to host */
     uint32_t timer; /**< time gap between get_next_assertion calls  */
     bool uv; /**< user verified */
     bool up; /**< user present */

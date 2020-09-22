@@ -47,15 +47,17 @@ def authenticate(server, client, credentials):
     request_options, state = server.authenticate_begin(credentials)
 
     assertions, client_data = client.get_assertion(request_options["publicKey"])
-    assertion = assertions[0]  # Only one cred in allowCredentials, only one response.
-    server.authenticate_complete(
-        state,
-        credentials,
-        assertion.credential["id"],
-        client_data,
-        assertion.auth_data,
-        assertion.signature,
-    )
+    print("ASSERTIONS: ", assertions)
+
+    for assertion in assertions:
+        server.authenticate_complete(
+            state,
+            credentials,
+            assertion.credential["id"],
+            client_data,
+            assertion.auth_data,
+            assertion.signature,
+        )
 
 #https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestCtap(unittest.TestCase):
@@ -198,6 +200,10 @@ class TestCtap(unittest.TestCase):
         credential2 = make_credential(server, client, user2)[0]
         print("User2 credential created")
 
+        '''
+        Authenticating both credentials.
+
+        '''
         authenticate(server, client, [credential1, credential2])
         print("Credentials authenticated !")
 

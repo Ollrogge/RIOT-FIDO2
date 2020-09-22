@@ -419,7 +419,8 @@ static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t* key)
 }
 
 /* http://cbor.me/ */
-static void print_cbor_hex(uint8_t* req, size_t size)
+/*
+static void print_hex(uint8_t* req, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
         DEBUG("%02x", req[i]);
@@ -427,6 +428,7 @@ static void print_cbor_hex(uint8_t* req, size_t size)
 
     DEBUG("\n");
 }
+*/
 
 uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size, uint8_t *req_raw)
 {
@@ -441,9 +443,6 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
     size_t map_len;
 
     uint8_t required_parsed = 0;
-
-    DEBUG("Get assertion req cbor: ");
-    print_cbor_hex(req_raw, size);
 
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -539,9 +538,6 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
 
     uint8_t required_parsed = 0;
 
-    DEBUG("client_pin_req cbor: ");
-    print_cbor_hex(req_raw, size);
-
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
@@ -624,9 +620,6 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
     size_t map_len;
 
     uint8_t required_parsed = 0;
-
-    DEBUG("Make credential req cbor: ");
-    print_cbor_hex(req_raw, size);
 
     ret = cbor_parser_init(req_raw, size, CborValidateCanonicalFormat, &parser, &it);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -1157,6 +1150,9 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_t *cred)
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     if (buf_len != sizeof(cred->cred_id)) return CTAP2_ERR_MISSING_PARAMETER;
+
+    ret = cbor_value_advance(arr);
+    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     return CTAP2_OK;
 }

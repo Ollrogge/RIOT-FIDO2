@@ -100,8 +100,6 @@ static bool should_cancel(void)
     ret = ctap_buffer.should_cancel;
     mutex_unlock(&ctap_buffer.should_cancel_mutex);
 
-    DEBUG("Should cancel: %d \n", ret);
-
     return ret;
 }
 
@@ -390,10 +388,7 @@ static void* pkt_worker(void* arg)
         uint16_t bcnt = ctap_buffer.bcnt;
         uint8_t cmd = ctap_buffer.cmd;
 
-        DEBUG("PKT WORKER \n");
-
         if (cmd == CTAP_HID_COMMAND_INIT) {
-            DEBUG("CTAP_HID: INIT COMMAND \n");
             cid = handle_init_packet(cid, bcnt, buf);
         }
         else {
@@ -535,8 +530,6 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
     memset(&resp, 0, sizeof(ctap_resp_t));
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
-
-    DEBUG("CTAPHID CBOR BYTES TO SENT: %u %u\n", size, resp.status);
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */

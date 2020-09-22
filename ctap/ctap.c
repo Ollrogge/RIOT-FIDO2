@@ -236,6 +236,8 @@ static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len)
     return CTAP2_OK;
 }
 
+/* http://cbor.me/ */
+
 static void print_hex(uint8_t* data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
@@ -245,11 +247,10 @@ static void print_hex(uint8_t* data, size_t size)
     DEBUG("\n");
 }
 
+
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                            bool (*should_cancel)(void))
 {
-    DEBUG("ctap handle request %u \n ", size);
-
     CborEncoder encoder;
     uint8_t cmd = *req;
     uint8_t* buf = resp->data;
@@ -263,31 +264,38 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
     switch (cmd)
     {
         case CTAP_GET_INFO:
-            DEBUG("CTAP GET INFO \n");
+            DEBUG("ctap_get_info req \n");
             resp->status = get_info(&encoder);
+            DEBUG("ctap_get_info resp: status: %u, size: %u \n",
+            resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_MAKE_CREDENTIAL:
-            DEBUG("CTAP MAKE CREDENTIAL \n");
+            DEBUG("ctap_make_credential req \n");
             resp->status = make_credential(&encoder, size, req, should_cancel);
-            print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
+            DEBUG("ctap_make_credential resp: status: %u, size: %u \n",
+            resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_ASSERTION:
-            DEBUG("CTAP GET_ASSERTION \n");
+            DEBUG("ctap_get_assertion req \n");
             resp->status = get_assertion(&encoder, size, req, should_cancel);
-            DEBUG("get assertion resp: ");
-            print_hex(buf, cbor_encoder_get_buffer_size(&encoder, buf));
+            DEBUG("ctap_get_assertion resp: status: %u, size: %u \n",
+            resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_GET_NEXT_ASSERTION:
-            DEBUG("CTAP GET NEXT ASSERTION \n");
+            DEBUG("ctap_get_next_assertion req \n");
             resp->status = get_next_assertion(&encoder, size, req);
+            DEBUG("ctap_get_next_assertion resp: status: %u, size: %u \n",
+            resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
         case CTAP_CLIENT_PIN:
-            DEBUG("CTAP CLIENT PIN \n");
+            DEBUG("ctap_client_pin req \n");
             resp->status = client_pin(&encoder, size,req, should_cancel);
+            DEBUG("ctap_client_pin resp: status: %u, size: %u \n",
+            resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
 #ifdef CTAP_TESTING
@@ -297,7 +305,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             break;
 #endif
         default:
-            DEBUG("CTAP UNKNOWN PACKET: %u \n", cmd);
+            DEBUG("ctap unknown packet: %u \n", cmd);
             resp->status = CTAP1_ERR_INVALID_COMMAND;
             return 0;
             break;
@@ -373,9 +381,6 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         uv = true;
     }
 
-    DEBUG("Make credential options: %d %d %d \n", req.options.rk,
-            req.options.up, req.options.uv);
-
     /* last moment where transaction can be cancelled */
     if (should_cancel()) {
         return CTAP2_ERR_KEEPALIVE_CANCEL;
@@ -393,7 +398,11 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
-    save_rk(&rk);
+    ret = save_rk(&rk);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     return CTAP2_OK;
 }
@@ -419,13 +428,12 @@ static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
         /* search for rk's matching rp_id_hash */
         if (memcmp(rk_temp.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
 
-            /* if allow list, also check that cred_id matches */
+            /* if allow list, also check that cred_id is in list */
             if (allow_list_len > 0) {
                 for (size_t j = 0; j < allow_list_len; j++) {
                     if (memcmp(allow_list[j].cred_id, rk_temp.cred_desc.cred_id,
                         sizeof(allow_list[j].cred_id)) == 0) {
                             memmove(&rks[index], &rk_temp, sizeof(rks[index]));
-
                             index++;
                             break;
                     }
@@ -441,9 +449,9 @@ static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
     DEBUG("FIND MATCHING RK: %u %u \n", index, allow_list_len);
 
     /* sort ascending order based on sign count */
-    qsort(rks, index + 1, sizeof(ctap_resident_key_t), cred_cmp);
+    qsort(rks, index, sizeof(ctap_resident_key_t), cred_cmp);
 
-    return index + 1;
+    return index;
 }
 
 static int cred_cmp(const void *a, const void *b)
@@ -512,11 +520,13 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
 
         uv = true;
+        g_assert_state.uv = true;
     }
 
      /* todo: add macro to disable user presence test */
     if (user_presence_test() == CTAP2_OK) {
         up = true;
+        g_assert_state.up = true;
     }
 
     if (!g_assert_state.count) {
@@ -527,6 +537,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
             sizeof(g_assert_state.client_data_hash));
 
     rk = &g_assert_state.rks[0];
+    g_assert_state.cred_counter++;
 
     if (req.options.uv) {
         return CTAP2_ERR_UNSUPPORTED_OPTION;
@@ -545,20 +556,27 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return ret;
     }
 
-    ret = cbor_helper_encode_assertion_object(encoder, &auth_data, req.client_data_hash,
-                                              rk, g_assert_state.count);
+    ret = cbor_helper_encode_assertion_object(encoder, &auth_data,
+                                req.client_data_hash, rk, g_assert_state.count);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
+    g_assert_state.timer = xtimer_now_usec();
+
     /* webauthn specification (version 20190304) section 6.1.1 */
     rk->sign_count++;
-    save_rk(rk);
+    ret = save_rk(rk);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     return CTAP2_OK;
 }
 
+/* CTAP specification (version 20190130) section 5.3 */
 static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
                                   uint8_t *req_raw)
 {
@@ -567,8 +585,20 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
 
     int ret;
     ctap_auth_data_header_t auth_data;
+    uint32_t now;
+
+    /* no current valid assertion req pending */
+    if (g_assert_state.timer == 0) {
+        return CTAP2_ERR_NOT_ALLOWED;
+    }
 
     if (g_assert_state.cred_counter >= g_assert_state.count) {
+        return CTAP2_ERR_NOT_ALLOWED;
+    }
+
+    now = xtimer_now_usec();
+    if (now - g_assert_state.timer > CTAP_GET_NEXT_ASSERTION_TIMEOUT) {
+        memset(&g_assert_state, 0, sizeof(g_assert_state));
         return CTAP2_ERR_NOT_ALLOWED;
     }
 
@@ -591,9 +621,15 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
         return ret;
     }
 
+    g_assert_state.timer = xtimer_now_usec();
+
     /* webauthn specification (version 20190304) section 6.1.1 */
     rk->sign_count++;
-    save_rk(rk);
+    ret = save_rk(rk);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     return CTAP2_OK;
 }
@@ -737,7 +773,7 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
         return ret;
     }
 
-    DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
+    DEBUG("PIN DEC: %s \n", (char*)new_pin_dec);
 
     len = fmt_strnlen((char*)new_pin_dec, CTAP_PIN_MAX_SIZE);
     if (len < CTAP_PIN_MIN_SIZE) {
@@ -795,7 +831,7 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
-    DEBUG("BIN DEC: %s \n", (char*)new_pin_dec);
+    DEBUG("PIN DEC: %s \n", (char*)new_pin_dec);
 
     new_pin_dec_len = fmt_strnlen((char*)new_pin_dec, CTAP_PIN_MAX_SIZE);
     if (new_pin_dec_len < CTAP_PIN_MIN_SIZE) {
@@ -844,9 +880,6 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
     if (should_cancel()) {
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
-
-    DEBUG("Pin hash: ");
-    print_hex(pin_hash_dec, sizeof(pin_hash_dec));
 
     sha256_init(&ctx),
     sha256_update(&ctx, pin_hash_dec, 16);
@@ -924,43 +957,57 @@ static bool rks_are_equal(ctap_resident_key_t *rk1, ctap_resident_key_t *rk2)
 /**
  * overwrite existing key if equal, else find free space.
  *
- * CTAP2 does not have credential management yet, so rk's can't be deleted,
- * only overwritten. Therefore we can be sure, that rk's are stored
- * sequentially.
+ * The current official CTAP2 spec does not have credential management yet,
+ * so rk's can't be deleted,only overwritten => we can be sure, that there are
+ * no holes when reading keys from flash memory
  */
 static uint8_t save_rk(ctap_resident_key_t *rk)
 {
-    uint16_t page_offset, page_offset_into_page;
+    uint16_t page_offset = 0, page_offset_into_page = 0;
     uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk_temp;
+    bool equal = false;
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
         return CTAP2_ERR_KEY_STORE_FULL;
     }
 
-    for (uint16_t i = 0; i <= g_state.rk_amount_stored; i++) {
-        page_offset = i / (FLASHPAGE_SIZE / sizeof(ctap_resident_key_t));
-        page_offset_into_page = sizeof(ctap_resident_key_t) * (i % \
-                                (FLASHPAGE_SIZE / sizeof(ctap_resident_key_t)));
+    if (g_state.rk_amount_stored != 0) {
+         /* <= is intended. */
+        for (uint16_t i = 0; i <= g_state.rk_amount_stored; i++) {
+            page_offset = i / (FLASHPAGE_SIZE / sizeof(ctap_resident_key_t));
+            page_offset_into_page = sizeof(ctap_resident_key_t) * (i % \
+                                    (FLASHPAGE_SIZE / sizeof(ctap_resident_key_t)));
 
-        if (page_offset_into_page == 0) {
-            memset(page, 0, sizeof(page));
-            flashpage_read(CTAP_RK_START_PAGE + page_offset, page);
-        }
+            /* beginning of a new page, read from flash */
+            if (page_offset_into_page == 0) {
+                memset(page, 0, sizeof(page));
+                flashpage_read(CTAP_RK_START_PAGE + page_offset, page);
+            }
 
-        memmove(&rk_temp, page + page_offset_into_page, sizeof(rk_temp));
+            memmove(&rk_temp, page + page_offset_into_page, sizeof(rk_temp));
 
-        if (rks_are_equal(&rk_temp, rk)) {
-            break;
+            /* if equal, overwrite */
+            if (rks_are_equal(&rk_temp, rk)) {
+                equal = true;
+                break;
+            }
         }
     }
 
     memmove(page + page_offset_into_page, rk, sizeof(*rk));
 
-    flashpage_write_and_verify(CTAP_RK_START_PAGE + page_offset, page);
+    if (flashpage_write_and_verify(CTAP_RK_START_PAGE + page_offset, page)
+        != FLASHPAGE_OK)
+    {
+        DEBUG("ctap save rk: flash write failed \n");
+        return CTAP1_ERR_OTHER;
+    }
 
-    g_state.rk_amount_stored++;
-    save_state(&g_state);
+    if (!equal) {
+        g_state.rk_amount_stored++;
+        save_state(&g_state);
+    }
 
     return CTAP2_OK;
 }
@@ -1110,9 +1157,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
     return CTAP2_OK;
 }
 
-// https://wiki.openssl.org/index.php/DER
-// http://luca.ntop.org/Teaching/Appunti/asn1.html
-// https://www.w3.org/TR/webauthn/#packed-attestation
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
                             ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len)
 {
