@@ -59,7 +59,6 @@ def authenticate(server, client, credentials):
             assertion.signature,
         )
 
-#https://github.com/Yubico/python-fido2/blob/master/test/test_hid.py
 class TestCtap(unittest.TestCase):
     @unittest.skip
     def test_info(self):
@@ -79,6 +78,7 @@ class TestCtap(unittest.TestCase):
             print("")
 
             self.assertEqual(info.versions, ['FIDO_2_0'])
+            #hardcoded in FIDO2 code atm.
             self.assertEqual(info.aaguid, a2b_hex("9c295865fa2c36b705a42320af9c8f16"))
 
         else:

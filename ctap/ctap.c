@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #include "fmt.h"
 #include "ctap.h"
@@ -50,6 +51,7 @@ static uint8_t save_pin(uint8_t *pin, size_t len);
 static void save_state(ctap_state_t *state);
 static void load_state(ctap_state_t *state);
 static bool pin_is_set(void);
+static bool pin_protocol_supported(uint8_t version);
 static uint8_t get_remaining_pin_attempts(void);
 static uint8_t decrement_pin_attempts(void);
 static void reset_pin_attempts(void);
@@ -62,8 +64,12 @@ static void gpio_cb(void *arg);
 static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
                                 ctap_cred_desc_t *allow_list,size_t allow_list_len,
                                 uint8_t* rp_id, size_t rp_id_len);
+static bool rks_exist(ctap_cred_desc_t *li, size_t len, uint8_t *rp_id,
+                        size_t rp_id_len);
 static int cred_cmp(const void *a, const void *b);
 static bool rks_are_equal(ctap_resident_key_t *rk1, ctap_resident_key_t *rk2);
+static bool flag_is_set(uint8_t val, uint8_t flag);
+static bool rk_enabled(void);
 
 static ctap_state_t g_state;
 static ctap_get_assertion_state_t g_assert_state;
@@ -85,6 +91,23 @@ void ctap_init(void)
 
         ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
 
+        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_PLAT;
+
+#ifdef CONFIG_CTAP_OPTIONS_RK
+        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_RK;
+#else
+        ctap_crypto_prng(g_state.cred_key, sizeof(g_state.cred_key));
+#endif
+        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
+        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_UP;
+
+        uint8_t aaguid[] = {CTAP_AAGUID};
+
+        static_assert(sizeof(aaguid) == CTAP_AAGUID_SIZE, "AAGUID has to be \
+                      128 bits long");
+
+        memmove(g_state.config.aaguid, aaguid, sizeof(g_state.config.aaguid));
+
         save_state(&g_state);
     }
 
@@ -104,13 +127,16 @@ static void reset(void)
     ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
     g_state.rk_amount_stored = 0;
 
+    if (!rk_enabled()) {
+        ctap_crypto_prng(g_state.cred_key, sizeof(g_state.cred_key));
+    }
+
     save_state(&g_state);
 }
 
 static void gpio_cb(void *arg)
 {
     (void)arg;
-
     g_user_present = true;
 }
 
@@ -181,6 +207,21 @@ bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type)
     return false;
 }
 
+static bool rk_enabled(void)
+{
+    return flag_is_set(g_state.config.options, CTAP_INFO_OPTIONS_FLAG_RK);
+}
+
+static bool flag_is_set(uint8_t val, uint8_t flag)
+{
+    return (val & flag) == flag;
+}
+
+static bool pin_protocol_supported(uint8_t version)
+{
+    return version == CTAP_PIN_PROT_VER;
+}
+
 static bool pin_is_set(void)
 {
     return g_state.pin_is_set;
@@ -237,7 +278,7 @@ static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len)
 }
 
 /* http://cbor.me/ */
-
+/*
 static void print_hex(uint8_t* data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
@@ -246,7 +287,7 @@ static void print_hex(uint8_t* data, size_t size)
 
     DEBUG("\n");
 }
-
+*/
 
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                            bool (*should_cancel)(void))
@@ -320,21 +361,10 @@ static uint8_t get_info(CborEncoder *encoder)
     memset(&info, 0, sizeof(info));
 
     info.versions |= CTAP_VERSION_FLAG_FIDO;
-
-    uint8_t aaguid[] = {DEVICE_AAGUID};
-
-    info.aaguid = aaguid;
-    info.len = sizeof(aaguid);
-
-    info.options |= CTAP_INFO_OPTIONS_FLAG_PLAT;
-    info.options |= CTAP_INFO_OPTIONS_FLAG_RK;
-    info.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
-    info.options |= CTAP_INFO_OPTIONS_FLAG_UP;
-
+    memmove(info.aaguid, g_state.config.aaguid, sizeof(info.aaguid));
+    info.options = g_state.config.options;
     info.max_msg_size = CTAP_MAX_MSG_SIZE;
-
     info.pin_protocol = CTAP_PIN_PROT_VER;
-
     info.pin_is_set = pin_is_set();
 
     return cbor_helper_encode_info(encoder, &info);
@@ -348,6 +378,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     ctap_make_credential_req_t req;
     ctap_auth_data_t auth_data;
     ctap_resident_key_t rk;
+    ctap_cred_desc_t exclude_list[CTAP_MAX_EXCLUDE_LIST_SIZE];
     bool uv = false;
 
     if (locked()) {
@@ -366,8 +397,33 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
+    if (req.exclude_list_len > 0) {
+
+        if (req.exclude_list_len > CTAP_MAX_EXCLUDE_LIST_SIZE) {
+            req.exclude_list_len = CTAP_MAX_EXCLUDE_LIST_SIZE;
+        }
+
+        for (uint8_t i = 0; i < req.exclude_list_len; i++) {
+            ret = parse_cred_desc(&req.exclude_list, &exclude_list[i]);
+
+            if (ret != CTAP2_OK) {
+                return ret;
+            }
+        }
+
+        if (rks_exist(exclude_list, req.exclude_list_len, req.rp.id,
+            req.rp.id_len)) {
+            user_presence_test();
+            return CTAP2_ERR_CREDENTIAL_EXCLUDED;
+        }
+    }
+
     if (pin_is_set() && !req.pin_auth_present) {
         return CTAP2_ERR_PIN_REQUIRED;
+    }
+
+    if (req.pin_auth_present && !pin_protocol_supported(req.pin_protocol)) {
+        return CTAP2_ERR_PIN_AUTH_INVALID;
     }
 
     if (pin_is_set() && req.pin_auth_present) {
@@ -386,13 +442,15 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
-    ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params, &auth_data, &rk, uv);
+    ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params,
+                                &auth_data, &rk, uv);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
-    ret = cbor_helper_encode_attestation_object(encoder, &auth_data, req.client_data_hash, &rk);
+    ret = cbor_helper_encode_attestation_object(encoder, &auth_data,
+                                                req.client_data_hash, &rk);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -407,6 +465,30 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     return CTAP2_OK;
 }
 
+static bool rks_exist(ctap_cred_desc_t *li, size_t len, uint8_t *rp_id,
+                        size_t rp_id_len)
+{
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
+    sha256(rp_id, rp_id_len, rp_id_hash);
+    ctap_resident_key_t rk;
+
+    for (uint16_t i = 0; i < g_state.rk_amount_stored; i++) {
+        memset(&rk, 0, sizeof(rk));
+        load_rk(i, &rk);
+
+        if (memcmp(rk.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
+            for (size_t j = 0; j < len; j++) {
+                if (memcmp(li[j].cred_id, rk.cred_desc.cred_id,
+                    sizeof(li[j].cred_id)) == 0) {
+                        return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 /* find most recent rk matching rp_id_hash and present in allow_list */
 static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
                                 ctap_cred_desc_t *allow_list,size_t allow_list_len,
@@ -414,7 +496,7 @@ static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
 {
     uint8_t index = 0;
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
-    ctap_resident_key_t rk_temp;
+    ctap_resident_key_t rk;
 
     sha256(rp_id, rp_id_len, rp_id_hash);
 
@@ -422,31 +504,29 @@ static uint8_t find_matching_rks(ctap_resident_key_t *rks, size_t rks_len,
         if (index >= rks_len) {
             break;
         }
-        memset(&rk_temp, 0, sizeof(rk_temp));
-        load_rk(i, &rk_temp);
+        memset(&rk, 0, sizeof(rk));
+        load_rk(i, &rk);
 
         /* search for rk's matching rp_id_hash */
-        if (memcmp(rk_temp.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
+        if (memcmp(rk.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
 
             /* if allow list, also check that cred_id is in list */
             if (allow_list_len > 0) {
                 for (size_t j = 0; j < allow_list_len; j++) {
-                    if (memcmp(allow_list[j].cred_id, rk_temp.cred_desc.cred_id,
+                    if (memcmp(allow_list[j].cred_id, rk.cred_desc.cred_id,
                         sizeof(allow_list[j].cred_id)) == 0) {
-                            memmove(&rks[index], &rk_temp, sizeof(rks[index]));
+                            memmove(&rks[index], &rk, sizeof(rks[index]));
                             index++;
                             break;
                     }
                 }
             }
             else {
-                memmove(&rks[index], &rk_temp, sizeof(rks[index]));
+                memmove(&rks[index], &rk, sizeof(rks[index]));
                 index++;
             }
         }
     }
-
-    DEBUG("FIND MATCHING RK: %u %u \n", index, allow_list_len);
 
     /* sort ascending order based on sign count */
     qsort(rks, index, sizeof(ctap_resident_key_t), cred_cmp);
@@ -1108,7 +1188,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 {
     int ret;
      /* device aaguid */
-    uint8_t aaguid[] = {DEVICE_AAGUID};
+    uint8_t aaguid[] = {CTAP_AAGUID};
 
     memset(auth_data, 0, sizeof(*auth_data));
     ctap_auth_data_header_t *auth_header = &auth_data->header;
@@ -1131,11 +1211,6 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 
     memmove(cred_header->aaguid, &aaguid, sizeof(cred_header->aaguid));
 
-    /* generate credential id */
-    ctap_crypto_prng(cred_header->cred_id, sizeof(cred_header->cred_id));
-    cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
-    cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
-
     ret = ctap_crypto_gen_keypair(&cred_data->key, rk->priv_key);
 
     if (ret != CTAP2_OK) {
@@ -1147,12 +1222,38 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
     cred_data->key.crv = CTAP_COSE_KEY_CRV_P256;
     cred_data->key.kty = CTAP_COSE_KEY_KTY_EC2;
 
-    /* init resident key struct */
-    memmove(rk->rp_id_hash, auth_header->rp_id_hash, sizeof(rk->rp_id_hash));
-    memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(rk->cred_desc.cred_id));
-    memmove(rk->user_id, user->id, user->id_len);
+    /* init rk */
     rk->cred_desc.cred_type = cred_params->cred_type;
     rk->user_id_len = user->id_len;
+
+    memmove(rk->user_id, user->id, user->id_len);
+    memmove(rk->rp_id_hash, auth_header->rp_id_hash, sizeof(rk->rp_id_hash));
+
+    if (rk_enabled()) {
+        /* generate credential id as 16 random bytes */
+        ctap_crypto_prng(cred_header->cred_id, sizeof(cred_header->cred_id));
+        cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
+        cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
+
+        memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(rk->cred_desc.cred_id));
+    }
+    else {
+        /* generate credential id from resident key credential */
+        uint8_t nonce[15 - CTAP_AES_CCM_L];
+        uint8_t key[CTAP_CRED_KEY_LEN];
+
+        ctap_crypto_prng(nonce, sizeof(nonce));
+        ctap_crypto_prng(key, sizeof(key));
+
+        ctap_crypto_aes_ccm_enc(&cred_header->cred_id_enc, (uint8_t*)&rk,
+                                sizeof(rk), NULL, 0, CTAP_AES_CCM_MAC_SIZE,
+                                CTAP_AES_CCM_L, nonce, key);
+
+        cred_header->cred_len_h = (sizeof(cred_header->cred_id_enc) & 0xff00) >> 8;
+        cred_header->cred_len_l = sizeof(cred_header->cred_id_enc) & 0x00ff;
+    }
+
+    //memmove(rk->cred_desc.cred_id, cred_header->cred_id, sizeof(rk->cred_desc.cred_id));
 
     return CTAP2_OK;
 }

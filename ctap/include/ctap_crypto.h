@@ -52,6 +52,11 @@ uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key);
 uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
                             size_t *sig_len, uint8_t *key, size_t key_len);
 
+uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t *in,
+                                size_t in_len, uint8_t *a, size_t a_len,
+                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
+                                uint8_t *key);
+
 #ifdef __cplusplus
 }
 #endif

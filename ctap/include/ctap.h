@@ -191,6 +191,21 @@ extern "C" {
 #define CTAP_KEY_LEN 32
 
 /**
+ * @brief Size of key used to encrypt credential
+ *
+ * @note Needed if authenticator is unable to store resident keys.
+ * See webauthn specification (version 20190304) section 4 (Credential ID)
+ * for details
+ */
+#define CTAP_CRED_KEY_LEN 16
+
+#define CTAP_AES_CCM_L ((sizeof(ctap_resident_key_t) / (1 << 8)) + 1)
+
+#define CTAP_AES_CCM_MAC_SIZE 16
+
+#define CTAP_CREDENTIAL_ID_ENC_SIZE (sizeof(ctap_resident_key_t) + CTAP_AES_CCM_MAC_SIZE)
+
+/**
  * @brief Start page for storing resident keys
  */
 #define CTAP_RK_START_PAGE 26U
@@ -204,7 +219,7 @@ extern "C" {
 /**
  * @brief Timeout for user presence test
  */
-#define CTAP_UP_TIMEOUT (3 * US_PER_SEC)
+#define CTAP_UP_TIMEOUT (15 * US_PER_SEC)
 
 /**
  * @brief Max time between call to get_assertion /
@@ -358,12 +373,13 @@ extern "C" {
 
 /**
  * 128 bit identifier indentifying type of authenticator
- * Todo: how to set this based on being in a generic OS ?
- *
- * aaguid was randomly chosen for testing
  */
-#define DEVICE_AAGUID 0x9c, 0x29, 0x58, 0x65, 0xfa, 0x2c, 0x36, 0xb7, \
-                      0x05, 0xa4, 0x23, 0x20, 0xaf, 0x9c, 0x8f, 0x16
+#ifdef CONFIG_CTAP_AAGUID
+#define CTAP_AAGUID CONFIG_CTAP_AAGUID
+#else
+#error Please configure ctap device AAGUID. For development you may \
+        set CONFIG_CTAP_AAGUID=${CTAP_AAGUID_TESTING}
+#endif
 
 /**
  * @name CTAP credential types
@@ -425,6 +441,11 @@ extern "C" {
  * @brief max size of allow list
  */
 #define CTAP_MAX_ALLOW_LIST_SIZE 0x10
+
+/**
+ * @brief max size of allow list
+ */
+#define CTAP_MAX_EXCLUDE_LIST_SIZE 0x10
 
 /**
  * @brief CTAP resp struct forward declaration
@@ -619,7 +640,10 @@ typedef struct __attribute__((packed))
     uint8_t aaguid[CTAP_AAGUID_SIZE];
     uint8_t cred_len_h;
     uint8_t cred_len_l;
-    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
+    union {
+        uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
+        uint8_t cred_id_enc[CTAP_CREDENTIAL_ID_ENC_SIZE];
+    }
 } ctap_attested_cred_data_header_t;
 
 /**
@@ -653,6 +677,12 @@ typedef struct
     ctap_attested_cred_data_t attested_cred_data;
 } ctap_auth_data_t;
 
+typedef struct
+{
+    uint8_t options;  /*< options */
+    uint8_t aaguid[CTAP_AAGUID_SIZE]; /*< AAGUID of device */
+} ctap_config_t;
+
 /**
  * @brief General state of CTAP stored in flash memory
  *
@@ -665,14 +695,17 @@ typedef struct
     uint8_t rem_pin_att_boot; /**< remaining PIN attempts for this power cycle */
     uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
     uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
-    uint16_t rk_amount_stored; /**< total number of resident keys stored on device */
+    union {
+        uint16_t rk_amount_stored; /**< total number of resident keys stored on device */
+        uint8_t cred_key[CTAP_CRED_KEY_LEN]; /**< AES encryption key for cred */
+    };
+    ctap_config_t config;
 } ctap_state_t;
 
 typedef struct
 {
     uint8_t versions;   /**< supported versions of FIDO */
-    uint8_t *aaguid;    /**< AAGUID */
-    size_t len;         /**< len of AAGUID */
+    uint8_t aaguid[CTAP_AAGUID_SIZE]; /**< AAGUID */
     uint8_t options;    /**< supported options */
     uint16_t max_msg_size; /**< max message size */
     uint8_t pin_protocol; /**< supported PIN protocol versions */

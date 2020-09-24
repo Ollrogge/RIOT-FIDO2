@@ -55,7 +55,7 @@ uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
 
     ret = cbor_encode_uint(&map, CTAP_GET_INFO_RESP_AAGUID);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = cbor_encode_byte_string(&map, info->aaguid, info->len);
+    ret = cbor_encode_byte_string(&map, info->aaguid, sizeof(info->aaguid));
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     sz = 0;

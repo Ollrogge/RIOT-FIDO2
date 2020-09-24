@@ -1,6 +1,9 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
+#include "crypto/ciphers.h"
+#include "crypto/modes/ccm.h"
+
 #include "relic.h"
 
 #include "rijndael-api-fst.h"
@@ -144,10 +147,6 @@ uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len)
 {
-    /**
-     * +16 bytes because relic encrypts with padding and will add padding
-     * even if in_len % 16 = 0
-     */
     uint8_t iv[BC_LEN] = {0};
     keyInstance key_inst;
 	cipherInstance cipher_inst;
@@ -173,6 +172,33 @@ uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
     *out_len = blockEncrypt(&cipher_inst, &key_inst, in, in_len, out);
 
     if (*out_len <= 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    return CTAP2_OK;
+}
+
+//https://tools.ietf.org/html/rfc3610
+//http://api.riot-os.org/ccm_8h.html
+uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t * in,
+                                size_t in_len, uint8_t *a, size_t a_len,
+                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
+                                uint8_t *key)
+{
+    cipher_t cipher;
+    int ret, len;
+
+    ret = cipher_init(&cipher, CIPHER_AES_128, key, CCM_BLOCK_SIZE);
+
+    if (ret != 1) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    len = cipher_encrypt_ccm(&cipher, a, a_len, mac_len, l, nonce, 15 - l,
+                             in, in_len, out);
+
+
+    if (len < 0) {
         return CTAP1_ERR_OTHER;
     }
 
