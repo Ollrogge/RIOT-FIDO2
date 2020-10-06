@@ -66,7 +66,7 @@ static bool locked(void);
 static bool boot_locked(void);
 static uint8_t user_presence_test(void);
 static void gpio_cb(void *arg);
-static uint8_t find_matching_rks(ctap_key_t *ks, size_t rks_len,
+static uint8_t find_matching_rks(void *ks, size_t rks_len,
                                 ctap_cred_desc_t *allow_list,size_t allow_list_len,
                                 uint8_t* rp_id, size_t rp_id_len);
 static bool rks_exist(ctap_cred_desc_t *li, size_t len, uint8_t *rp_id,
@@ -489,7 +489,7 @@ static bool rks_exist(ctap_cred_desc_t *li, size_t len, uint8_t *rp_id,
 }
 
 /* find most recent rk matching rp_id_hash and present in allow_list */
-static uint8_t find_matching_rks(ctap_key_t *ks, size_t ks_len,
+static uint8_t find_matching_rks(void *ks_in, size_t ks_len,
                                 ctap_cred_desc_t *allow_list ,size_t allow_list_len,
                                 uint8_t *rp_id, size_t rp_id_len)
 {
@@ -500,6 +500,8 @@ static uint8_t find_matching_rks(ctap_key_t *ks, size_t ks_len,
     sha256(rp_id, rp_id_len, rp_id_hash);
 
 #ifdef CONFIG_CTAP_OPTIONS_RK
+    ctap_key_t* ks = (ctap_key_t*)ks_in;
+
     for (uint16_t i = 0; i < g_state.rk_amount_stored; i++) {
         if (index >= ks_len) {
             break;
@@ -531,6 +533,7 @@ static uint8_t find_matching_rks(ctap_key_t *ks, size_t ks_len,
     /* sort ascending order based on sign count */
     qsort(ks, index, sizeof(ctap_key_t), cred_cmp);
 #else
+    ctap_nonce_key_pair_t *ks = (ctap_nonce_key_pair_t*)ks_in;
     int ret;
     if (allow_list_len > 0) {
         for (size_t i = 0; i < allow_list_len; i++) {
@@ -539,17 +542,22 @@ static uint8_t find_matching_rks(ctap_key_t *ks, size_t ks_len,
             }
 
             uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];
+            size_t nonce_start = sizeof(k) + CTAP_AES_CCM_MAC_SIZE;
+
             memset(&k, 0, sizeof(k));
+            memmove(nonce, &allow_list[i].cred_id[nonce_start], sizeof(nonce));
 
             ret = ctap_crypto_aes_ccm_dec((uint8_t*)&k,
-                            (uint8_t*)allow_list[i].cred_id, sizeof(allow_list[i]), NULL, 0, CTAP_AES_CCM_MAC_SIZE,
+                            (uint8_t*)allow_list[i].cred_id, nonce_start,
+                            NULL, 0, CTAP_AES_CCM_MAC_SIZE,
                             CTAP_AES_CCM_L, nonce, g_state.cred_key);
 
             if (ret != CTAP2_OK) {
                 DEBUG("ctap_crypto_aes_ccm_dec failure \n");
             }
             else {
-                memmove(&ks[index], &k, sizeof(ks[index]));
+                memmove(&ks[index].k, &k, sizeof(ks[index].k));
+                memmove(&ks[index].n, nonce, sizeof(nonce));
                 index++;
             }
         }
@@ -566,6 +574,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     bool uv = false, up = false;
     ctap_get_assertion_req_t req;
     ctap_key_t *k;
+    uint8_t *n;
     ctap_auth_data_header_t auth_data;
     ctap_cred_desc_t allow_list[CTAP_MAX_ALLOW_LIST_SIZE];
 
@@ -598,10 +607,17 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
     }
 
+#ifdef CONFIG_CTAP_OPTIONS_RK
     g_assert_state.count = find_matching_rks(
-                            (ctap_key_t*)&g_assert_state.ks,
+                            (void*)&g_assert_state.ks,
                             sizeof(g_assert_state.ks), allow_list,
                             req.allow_list_len, req.rp_id, req.rp_id_len);
+#else
+    g_assert_state.count = find_matching_rks(
+                            (void*)&g_assert_state.ks,
+                            sizeof(g_assert_state.ks), allow_list,
+                            req.allow_list_len, req.rp_id, req.rp_id_len);
+#endif
 
     if (pin_is_set() && !req.pin_auth_present) {
         uv = false;
@@ -632,7 +648,14 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     memmove(g_assert_state.client_data_hash, req.client_data_hash,
             sizeof(g_assert_state.client_data_hash));
 
+#ifdef CONFIG_CTAP_OPTIONS_RK
     k = &g_assert_state.ks[0];
+    n = NULL;
+#else
+    k = &g_assert_state.ks[0].k;
+    n = g_assert_state.ks[0].n;
+#endif
+
     g_assert_state.cred_counter++;
 
     if (req.options.uv) {
@@ -657,7 +680,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
     ret = cbor_helper_encode_assertion_object(encoder, &auth_data,
-                                req.client_data_hash, k, g_assert_state.count);
+                                req.client_data_hash, k, n, g_assert_state.count);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -689,6 +712,8 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
     (void)req_raw;
 
     int ret;
+    ctap_key_t *k;
+    uint8_t *n;
     ctap_auth_data_header_t auth_data;
     uint32_t now;
 
@@ -707,7 +732,15 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
         return CTAP2_ERR_NOT_ALLOWED;
     }
 
-    ctap_key_t *k = &g_assert_state.ks[g_assert_state.cred_counter];
+
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    k = &g_assert_state.ks[g_assert_state.cred_counter];
+    n = NULL;
+#else
+    k = &g_assert_state.ks[g_assert_state.cred_counter].k;
+    n = g_assert_state.ks[g_assert_state.cred_counter].n;
+#endif
+
     g_assert_state.cred_counter++;
 
 #ifdef CONFIG_CTAP_OPTIONS_RK
@@ -726,7 +759,7 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
 
     /* cred count set to 0 because omitted when get_next_assertion */
     ret = cbor_helper_encode_assertion_object(encoder, &auth_data,
-                    g_assert_state.client_data_hash, k, 0);
+                    g_assert_state.client_data_hash, k, n, 0);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -1236,7 +1269,9 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
      /* device aaguid */
     uint8_t aaguid[] = {CTAP_AAGUID};
 
+    memset(k, 0, sizeof(*k));
     memset(auth_data, 0, sizeof(*auth_data));
+
     ctap_auth_data_header_t *auth_header = &auth_data->header;
     ctap_attested_cred_data_t *cred_data = &auth_data->attested_cred_data;
     ctap_attested_cred_data_header_t *cred_header = &cred_data->header;
@@ -1268,7 +1303,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
     cred_data->key.crv = CTAP_COSE_KEY_CRV_P256;
     cred_data->key.kty = CTAP_COSE_KEY_KTY_EC2;
 
-    /* init rk */
+    /* init key */
     k->cred_desc.cred_type = cred_params->cred_type;
     k->user_id_len = user->id_len;
 
@@ -1278,35 +1313,34 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 #ifdef CONFIG_CTAP_OPTIONS_RK
         /* generate credential id as 16 random bytes */
         ctap_crypto_prng(cred_header->cred_id, sizeof(cred_header->cred_id));
-        cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
-        cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
-
-        memmove(k->cred_desc.cred_id, cred_header->cred_id, sizeof(k->cred_desc.cred_id));
+        memmove(k->cred_desc.cred_id, cred_header->cred_id,
+                sizeof(k->cred_desc.cred_id));
 #else
         /* generate credential id from resident key credential */
-        ret = ctap_encrypt_k(k, cred_header->cred_id);
+        uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];
+        ctap_crypto_prng(nonce, sizeof(nonce));
+
+        ret = ctap_encrypt_k(k, nonce, cred_header->cred_id);
 
         if (ret != CTAP2_OK) {
             return ret;
         }
-
-        cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
-        cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 #endif
+
+    cred_header->cred_len_h = (sizeof(cred_header->cred_id) & 0xff00) >> 8;
+    cred_header->cred_len_l = sizeof(cred_header->cred_id) & 0x00ff;
 
     return CTAP2_OK;
 }
 
 #ifndef CONFIG_CTAP_OPTIONS_RK
-uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t* buf)
+uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t* n, uint8_t* buf)
 {
     int ret;
-    uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];
-    ctap_crypto_prng(nonce, sizeof(nonce));
     size_t nonce_start = sizeof(*k) + CTAP_AES_CCM_MAC_SIZE;
 
     ret = ctap_crypto_aes_ccm_enc(buf, (uint8_t*)k, sizeof(*k), NULL, 0,
-                                CTAP_AES_CCM_MAC_SIZE, CTAP_AES_CCM_L, nonce,
+                                CTAP_AES_CCM_MAC_SIZE, CTAP_AES_CCM_L, n,
                                 g_state.cred_key);
 
     if (ret != CTAP2_OK) {
@@ -1314,14 +1348,15 @@ uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t* buf)
         return ret;
     }
 
-    memmove(&buf[nonce_start], nonce, sizeof(nonce));
+    memmove(&buf[nonce_start], n, CTAP_AES_CCM_NONCE_SIZE);
 
     return CTAP2_OK;
 }
 #endif
 
-uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
-                            ctap_key_t *k, uint8_t* sig, size_t *sig_len)
+uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len,
+                            uint8_t *client_data_hash, ctap_key_t *k,
+                            uint8_t* sig, size_t *sig_len)
 {
     sha256_context_t ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];

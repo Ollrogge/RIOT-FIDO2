@@ -133,7 +133,8 @@ uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
 }
 
 uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash, ctap_key_t *k,
+                                            uint8_t *client_data_hash,
+                                            ctap_key_t *k, uint8_t* n,
                                             uint8_t valid_cred_count)
 {
     int ret;
@@ -150,12 +151,13 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
 #ifdef CONFIG_CTAP_OPTIONS_RK
+    (void)n;
     ret = encode_credential(&map, &k->cred_desc);
 #else
     ctap_cred_desc_t cred_desc;
     cred_desc.cred_type = k->cred_desc.cred_type;
 
-    ctap_encrypt_k(k, (uint8_t*)&cred_desc.cred_id);
+    ctap_encrypt_k(k, n, (uint8_t*)&cred_desc.cred_id);
 
     ret = encode_credential(&map, &cred_desc);
 #endif
@@ -210,6 +212,15 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     CborEncoder cose_key;
     CborEncoder attest_stmt_map;
 
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    /* encode auth data */
+    // possible optimization: allocate auth_data_buf in ctap.c and cast the binary buf to the needed struct.
+    // total size atm: 148 bytes
+    uint8_t auth_data_buf[256];
+#else
+    uint8_t auth_data_buf[512];
+#endif
+
     ret = cbor_encoder_create_map(encoder, &map, 3);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
@@ -219,11 +230,6 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
     ret = cbor_encode_text_stringz(&map, "packed");
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-
-    /* encode auth data */
-    // possible optimization: allocate auth_data_buf in ctap.c and cast the binary buf to the needed struct.
-    // total size atm: 148 bytes
-    uint8_t auth_data_buf[256];
 
     memmove(auth_data_buf, (void*)&auth_data->header, sizeof(ctap_auth_data_header_t));
     offset += sizeof(ctap_auth_data_header_t);
@@ -237,7 +243,6 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
 
     ret = encode_cose_key(&cose_key, &auth_data->attested_cred_data.key);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-
     offset += cbor_encoder_get_buffer_size(&cose_key, cose_key_buf);
 
     ret = cbor_encode_int(&map, CTAP_MC_RESP_AUTH_DATA);
@@ -246,10 +251,14 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* get signature for attesttation statement */
-    ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, k, sig_buf, &sig_buf_len);
+    ret = ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, k,
+                            sig_buf, &sig_buf_len);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     /* encode attestation statement */
-
     ret = cbor_encode_int(&map, CTAP_MC_RESP_ATT_STMT);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 

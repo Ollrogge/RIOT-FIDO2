@@ -101,7 +101,8 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
  * @return CTAP status code
  */
 uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash, ctap_key_t *k,
+                                            uint8_t *client_data_hash,
+                                            ctap_key_t *k, uint8_t* n,
                                             uint8_t valid_cred_count);
 
 /**

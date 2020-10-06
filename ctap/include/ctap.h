@@ -579,6 +579,14 @@ struct __attribute__((packed)) ctap_nonresident_key
     uint8_t priv_key[32];
 };
 
+#ifndef CONFIG_CTAP_OPTIONS_RK
+typedef struct
+{
+    struct ctap_nonresident_key k;
+    uint8_t n[CTAP_AES_CCM_NONCE_SIZE];
+} ctap_nonce_key_pair_t;
+#endif
+
 struct ctap_alt_cred_desc
 {
     uint8_t cred_type;
@@ -660,8 +668,11 @@ typedef struct
  */
 typedef struct
 {
-    ctap_key_t ks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate
-    credentials found */
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    ctap_key_t ks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate credentials found */
+#else
+    ctap_nonce_key_pair_t ks[CTAP_MAX_ALLOW_LIST_SIZE];
+#endif
     uint8_t count; /**< number of rks found  */
     uint8_t cred_counter; /**< amount of creds sent to host */
     uint32_t timer; /**< time gap between get_next_assertion calls  */
@@ -800,7 +811,7 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
 bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type);
 
 #ifndef CONFIG_CTAP_OPTIONS_RK
-uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t* buf);
+uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t *n, uint8_t* buf);
 #endif
 
 #ifdef __cplusplus
