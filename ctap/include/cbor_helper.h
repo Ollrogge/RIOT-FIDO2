@@ -87,7 +87,7 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
  * @return CTAP status code
  */
 uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash, ctap_resident_key_t *rk);
+                                              uint8_t *client_data_hash, ctap_key_t *k);
 
 /**
  * @brief Encode assertion object
@@ -101,7 +101,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
  * @return CTAP status code
  */
 uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash, ctap_resident_key_t *rk,
+                                            uint8_t *client_data_hash, ctap_key_t *k,
                                             uint8_t valid_cred_count);
 
 /**

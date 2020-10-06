@@ -205,6 +205,30 @@ uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t * in,
     return CTAP2_OK;
 }
 
+uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, uint8_t *in,
+                                size_t in_len, uint8_t *a, size_t a_len,
+                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
+                                uint8_t *key)
+{
+    cipher_t cipher;
+    int ret, len;
+
+    ret = cipher_init(&cipher, CIPHER_AES_128, key, CCM_BLOCK_SIZE);
+
+    if (ret != 1) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    len = cipher_decrypt_ccm(&cipher, a, a_len, mac_len, l, nonce, 15 - l,
+                             in, in_len, out);
+
+    if (len < 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    return CTAP2_OK;
+}
+
 uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 {
     ec_t pub;

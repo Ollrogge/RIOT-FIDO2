@@ -57,6 +57,11 @@ uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t *in,
                                 uint8_t mac_len, uint8_t l, uint8_t *nonce,
                                 uint8_t *key);
 
+uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, uint8_t *in,
+                                size_t in_len, uint8_t *a, size_t a_len,
+                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
+                                uint8_t *key);
+
 #ifdef __cplusplus
 }
 #endif

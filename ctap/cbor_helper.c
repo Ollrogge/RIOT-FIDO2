@@ -13,8 +13,8 @@ static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t parse_cose_key(CborValue *it, ctap_cose_key_t *cose_key);
 static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t *key);
-static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_desc);
-static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
+static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr);
+static uint8_t encode_user_entity(CborEncoder *it, ctap_key_t *rk);
 
 static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t *len);
 static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t *len);
@@ -133,7 +133,7 @@ uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
 }
 
 uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash, ctap_resident_key_t *rk,
+                                            uint8_t *client_data_hash, ctap_key_t *k,
                                             uint8_t valid_cred_count)
 {
     int ret;
@@ -149,7 +149,16 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     ret = cbor_encode_int(&map, CTAP_GA_RESP_CREDENTIAL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    ret = encode_credential(&map, &rk->cred_desc);
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    ret = encode_credential(&map, &k->cred_desc);
+#else
+    ctap_cred_desc_t cred_desc;
+    cred_desc.cred_type = k->cred_desc.cred_type;
+
+    ctap_encrypt_k(k, (uint8_t*)&cred_desc.cred_id);
+
+    ret = encode_credential(&map, &cred_desc);
+#endif
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -161,7 +170,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* get signature for assertion */
-    ctap_get_attest_sig((uint8_t*)auth_data, sizeof(*auth_data), client_data_hash, rk, sig_buf, &sig_buf_len);
+    ctap_get_attest_sig((uint8_t*)auth_data, sizeof(*auth_data), client_data_hash, k, sig_buf, &sig_buf_len);
 
     ret = cbor_encode_int(&map, CTAP_GA_RESP_SIGNATURE);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -170,7 +179,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
 
     ret = cbor_encode_int(&map, CTAP_GA_RESP_USER);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = encode_user_entity(&map, rk);
+    ret = encode_user_entity(&map, k);
     if (ret != CTAP2_OK) {
         return ret;
     }
@@ -189,7 +198,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
 }
 
 uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash, ctap_resident_key_t *rk)
+                                              uint8_t *client_data_hash, ctap_key_t *k)
 {
     int ret;
     CborEncoder map;
@@ -237,7 +246,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* get signature for attesttation statement */
-    ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, rk, sig_buf, &sig_buf_len);
+    ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, k, sig_buf, &sig_buf_len);
 
     /* encode attestation statement */
 
@@ -268,10 +277,12 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     return CTAP2_OK;
 }
 
-static uint8_t encode_credential(CborEncoder *encoder, ctap_cred_desc_t *cred_desc)
+static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr)
 {
     CborEncoder desc;
     int ret;
+
+    ctap_cred_desc_t *cred_desc = (ctap_cred_desc_t *)cred_ptr;
 
     ret = cbor_encoder_create_map(encoder, &desc, 2);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -359,7 +370,7 @@ uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_
 }
 
 // todo pass user entity struct once unnecessary field are removed
-static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
+static uint8_t encode_user_entity(CborEncoder *encoder, ctap_key_t *rk)
 {
     int ret;
     CborEncoder map;

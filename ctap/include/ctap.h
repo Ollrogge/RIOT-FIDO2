@@ -199,11 +199,32 @@ extern "C" {
  */
 #define CTAP_CRED_KEY_LEN 16
 
-#define CTAP_AES_CCM_L ((sizeof(ctap_resident_key_t) / (1 << 8)) + 1)
+/**
+ * @brief AES_CCM_L parameter
+ *
+ * @note L has to be between 2 and 8. Value of 2 means that message has to be
+ * in the range 0 <= l(m) < 2^(16) = 65536.
+ * This should always be sufficient to send a resident key.
+ */
+#define CTAP_AES_CCM_L 2
 
+/**
+ * @brief AES CCM nonce size
+ */
+#define CTAP_AES_CCM_NONCE_SIZE (15 - CTAP_AES_CCM_L)
+
+/**
+ * @brief AES CCM MAC size
+ */
 #define CTAP_AES_CCM_MAC_SIZE 16
 
-#define CTAP_CREDENTIAL_ID_ENC_SIZE (sizeof(ctap_resident_key_t) + CTAP_AES_CCM_MAC_SIZE)
+/**
+ * @brief total size of AES CCM credential id
+ *
+ * @note size has to be adjusted if resident key struct grows
+ */
+#define CTAP_CREDENTIAL_ID_ENC_SIZE (sizeof(struct ctap_nonresident_key) + \
+                                CTAP_AES_CCM_MAC_SIZE + CTAP_AES_CCM_NONCE_SIZE)
 
 /**
  * @brief Start page for storing resident keys
@@ -214,7 +235,7 @@ extern "C" {
  * @brief Max amount of resident keys we can store
  */
 #define CTAP_MAX_RK (((FLASHPAGE_NUMOF - CTAP_RK_START_PAGE) * FLASHPAGE_SIZE) /  \
-                    sizeof(ctap_resident_key_t))
+                    sizeof(struct ctap_resident_key))
 
 /**
  * @brief Timeout for user presence test
@@ -452,10 +473,13 @@ extern "C" {
  */
 typedef struct ctap_resp ctap_resp_t;
 
-/**
- * @brief CTAP resident key forward declaration
- */
-typedef struct ctap_resident_key ctap_resident_key_t;
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    typedef struct ctap_resident_key ctap_key_t;
+    typedef struct ctap_cred_desc   ctap_cred_desc_t;
+#else
+    typedef struct ctap_nonresident_key ctap_key_t;
+    typedef struct ctap_alt_cred_desc   ctap_cred_desc_t;
+#endif
 
 /**
  * @brief CTAP public key credential parameter
@@ -496,11 +520,11 @@ struct ctap_resp
  *
  * webauthn specification (version 20190304) section 5.8.3
  */
-typedef struct
+struct ctap_cred_desc
 {
     uint8_t cred_type;                          /**< type of credential */
     uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];   /**< credential identifier */
-} ctap_cred_desc_t;
+};
 
 /**
  * @brief CTAP options struct
@@ -543,6 +567,23 @@ typedef struct
     int32_t alg_type;    /**< COSEAlgorithmIdentifier */
     uint8_t cred_type;  /**< type of credential */
 } ctap_cose_key_t;
+
+struct __attribute__((packed)) ctap_nonresident_key
+{
+    struct {
+        uint8_t cred_type;
+    } cred_desc;
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
+    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
+    uint8_t user_id_len;
+    uint8_t priv_key[32];
+};
+
+struct ctap_alt_cred_desc
+{
+    uint8_t cred_type;
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_ENC_SIZE];
+};
 
 /**
  * @brief CTAP resident key struct
@@ -619,7 +660,7 @@ typedef struct
  */
 typedef struct
 {
-    ctap_resident_key_t rks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate
+    ctap_key_t ks[CTAP_MAX_ALLOW_LIST_SIZE]; /**< appropriate
     credentials found */
     uint8_t count; /**< number of rks found  */
     uint8_t cred_counter; /**< amount of creds sent to host */
@@ -627,7 +668,6 @@ typedef struct
     bool uv; /**< user verified */
     bool up; /**< user present */
     uint8_t client_data_hash[SHA256_DIGEST_LENGTH]; /**< SHA-256 hash of JSON serialized client data */
-
 } ctap_get_assertion_state_t;
 
 /**
@@ -640,10 +680,11 @@ typedef struct __attribute__((packed))
     uint8_t aaguid[CTAP_AAGUID_SIZE];
     uint8_t cred_len_h;
     uint8_t cred_len_l;
-    union {
-        uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
-        uint8_t cred_id_enc[CTAP_CREDENTIAL_ID_ENC_SIZE];
-    }
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_SIZE];
+#else
+    uint8_t cred_id[CTAP_CREDENTIAL_ID_ENC_SIZE];
+#endif
 } ctap_attested_cred_data_header_t;
 
 /**
@@ -695,11 +736,14 @@ typedef struct
     uint8_t rem_pin_att_boot; /**< remaining PIN attempts for this power cycle */
     uint8_t pin_hash[SHA256_DIGEST_LENGTH]; /**< SHA256 of PIN + salt */
     uint8_t pin_salt[CTAP_PIN_SALT_SIZE];  /**< PIN salt */
-    union {
-        uint16_t rk_amount_stored; /**< total number of resident keys stored on device */
-        uint8_t cred_key[CTAP_CRED_KEY_LEN]; /**< AES encryption key for cred */
-    };
     ctap_config_t config;
+
+#ifdef CONFIG_CTAP_OPTIONS_RK
+    uint16_t rk_amount_stored; /**< total number of resident keys stored on device */
+#else
+    uint32_t sign_count;  /**< global sign counter */
+    uint8_t cred_key[CTAP_CRED_KEY_LEN]; /**< AES CCM encryption key for cred */
+#endif
 } ctap_state_t;
 
 typedef struct
@@ -742,7 +786,7 @@ void ctap_init(void);
  * @return CTAP status code
  */
 uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *client_data_hash,
-                            ctap_resident_key_t *rk, uint8_t* sig, size_t *sig_len);
+                            ctap_key_t *k, uint8_t* sig, size_t *sig_len);
 
 
 /**
@@ -754,6 +798,10 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len, uint8_t *c
  * @return CTAP status code
  */
 bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type);
+
+#ifndef CONFIG_CTAP_OPTIONS_RK
+uint8_t ctap_encrypt_k(ctap_key_t *k, uint8_t* buf);
+#endif
 
 #ifdef __cplusplus
 }
