@@ -229,7 +229,7 @@ extern "C" {
 /**
  * @brief Start page for storing resident keys
  */
-#define CTAP_RK_START_PAGE 26U
+#define CTAP_RK_START_PAGE 30U
 
 /**
  * @brief Max amount of resident keys we can store
@@ -598,6 +598,7 @@ struct ctap_alt_cred_desc
  *
  *  https://www.w3.org/TR/webauthn/#client-side-resident-public-key-credential-source
  */
+//150
 struct __attribute__((packed)) ctap_resident_key
 {
     ctap_cred_desc_t cred_desc;

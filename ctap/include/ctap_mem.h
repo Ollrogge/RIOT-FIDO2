@@ -32,9 +32,7 @@ extern "C" {
 #endif
 
 
-int ctap_flash_write_and_verify(int page, const void *data, size_t len);
-
-void ctap_flash_write(int page, const void *data, size_t len);
+int ctap_flash_write_and_verify(int page, int offset, const void *data, size_t len);
 
 
 #ifdef __cplusplus

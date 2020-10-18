@@ -1,7 +1,3 @@
-
-#define ENABLE_DEBUG    (1)
-#include "debug.h"
-
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -17,6 +13,10 @@
 #include "rijndael-api-fst.h"
 #include "byteorder.h"
 #include "periph/gpio.h"
+#include "ctap_mem.h"
+
+#define ENABLE_DEBUG    (0)
+#include "debug.h"
 
 #define CTAP_TESTING 1
 
@@ -26,7 +26,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
                                      ctap_pub_key_cred_params_t *cred_params,
                                      ctap_auth_data_t* auth_data,
-                                     ctap_key_t *k ,bool uv);
+                                     ctap_key_t *k ,bool uv, bool up);
 static uint8_t make_auth_data_assert(uint8_t * rp_id, size_t rp_id_len,
                                     ctap_auth_data_header_t *auth_data, bool uv,
                                     bool up, uint32_t sign_count);
@@ -371,7 +371,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     ctap_auth_data_t auth_data;
     ctap_key_t k;
     ctap_cred_desc_t exclude_list[CTAP_MAX_EXCLUDE_LIST_SIZE];
-    bool uv = false;
+    bool uv = false, up = false;
 
     if (locked()) {
         return  CTAP2_ERR_PIN_BLOCKED;
@@ -434,8 +434,22 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
+#ifndef CONFIG_CTAP_OPTIONS_RK
+    if (req.options.rk) {
+        return CTAP2_ERR_KEY_STORE_FULL;
+    }
+#endif
+
+    /* todo: add macro to disable user presence test */
+    /*
+    if (user_presence_test() == CTAP2_OK) {
+        up = true;
+    }
+    */
+    up = true;
+
     ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params,
-                                &auth_data, &k, uv);
+                                &auth_data, &k, uv, up);
 
     if (ret != CTAP2_OK) {
         return ret;
@@ -450,7 +464,6 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
 #ifdef CONFIG_CTAP_OPTIONS_RK
     ret = save_rk(&k);
-
     if (ret != CTAP2_OK) {
         return ret;
     }
@@ -511,7 +524,6 @@ static uint8_t find_matching_rks(void *ks_in, size_t ks_len,
 
         /* search for rk's matching rp_id_hash */
         if (memcmp(k.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
-
             /* if allow list, also check that cred_id is in list */
             if (allow_list_len > 0) {
                 for (size_t j = 0; j < allow_list_len; j++) {
@@ -607,17 +619,10 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
     }
 
-#ifdef CONFIG_CTAP_OPTIONS_RK
     g_assert_state.count = find_matching_rks(
                             (void*)&g_assert_state.ks,
                             sizeof(g_assert_state.ks), allow_list,
                             req.allow_list_len, req.rp_id, req.rp_id_len);
-#else
-    g_assert_state.count = find_matching_rks(
-                            (void*)&g_assert_state.ks,
-                            sizeof(g_assert_state.ks), allow_list,
-                            req.allow_list_len, req.rp_id, req.rp_id_len);
-#endif
 
     if (pin_is_set() && !req.pin_auth_present) {
         uv = false;
@@ -636,10 +641,14 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
      /* todo: add macro to disable user presence test */
+    /*
     if (user_presence_test() == CTAP2_OK) {
         up = true;
         g_assert_state.up = true;
     }
+    */
+    up = true;
+    g_assert_state.up = true;
 
     if (!g_assert_state.count) {
         return CTAP2_ERR_NO_CREDENTIALS;
@@ -1125,6 +1134,8 @@ static uint8_t save_rk(ctap_key_t *rk)
     uint8_t page[FLASHPAGE_SIZE];
     ctap_key_t rk_temp;
     bool equal = false;
+    size_t rk_sz_pad = sizeof(*rk) + sizeof(*rk) % 4;
+    uint8_t buf[rk_sz_pad];
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
         return CTAP2_ERR_KEY_STORE_FULL;
@@ -1133,13 +1144,12 @@ static uint8_t save_rk(ctap_key_t *rk)
     if (g_state.rk_amount_stored != 0) {
          /* <= is intended. */
         for (uint16_t i = 0; i <= g_state.rk_amount_stored; i++) {
-            page_offset = i / (FLASHPAGE_SIZE / sizeof(ctap_key_t));
-            page_offset_into_page = sizeof(ctap_key_t) * (i % \
-                                    (FLASHPAGE_SIZE / sizeof(ctap_key_t)));
+            page_offset = i / (FLASHPAGE_SIZE / rk_sz_pad);
+            page_offset_into_page = rk_sz_pad * (i % \
+                                    (FLASHPAGE_SIZE / rk_sz_pad));
 
             /* beginning of a new page, read from flash */
             if (page_offset_into_page == 0) {
-                memset(page, 0, sizeof(page));
                 flashpage_read(CTAP_RK_START_PAGE + page_offset, page);
             }
 
@@ -1153,13 +1163,25 @@ static uint8_t save_rk(ctap_key_t *rk)
         }
     }
 
-    memmove(page + page_offset_into_page, rk, sizeof(*rk));
+    memset(buf, 0, sizeof(buf));
+    memmove(buf, rk, sizeof(*rk));
+    if (!equal) {
 
-    if (flashpage_write_and_verify(CTAP_RK_START_PAGE + page_offset, page)
-        != FLASHPAGE_OK)
-    {
-        DEBUG("ctap save rk: flash write failed \n");
-        return CTAP1_ERR_OTHER;
+        if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset,
+            page_offset_into_page, buf, sizeof(buf)) != FLASHPAGE_OK)
+        {
+            DEBUG("ctap save rk: flash write failed \n");
+            return CTAP1_ERR_OTHER;
+        }
+    }
+    else {
+        memmove(page + page_offset_into_page, buf, sizeof(buf));
+        if (flashpage_write_and_verify(CTAP_RK_START_PAGE + page_offset, page)
+            != FLASHPAGE_OK)
+        {
+            DEBUG("ctap save rk: flash write failed \n");
+            return CTAP1_ERR_OTHER;
+        }
     }
 
     if (!equal) {
@@ -1172,9 +1194,10 @@ static uint8_t save_rk(ctap_key_t *rk)
 
 static uint8_t load_rk(uint16_t index, ctap_key_t *rk)
 {
-    uint16_t page_offset = index / (FLASHPAGE_SIZE / sizeof(ctap_key_t));
-    uint16_t page_offset_into_page = sizeof(ctap_key_t) * (index % \
-                                (FLASHPAGE_SIZE / sizeof(ctap_key_t)));
+    size_t rk_sz_pad = sizeof(*rk) + sizeof(*rk) % 4;
+    uint16_t page_offset = index / (FLASHPAGE_SIZE / rk_sz_pad);
+    uint16_t page_offset_into_page = rk_sz_pad * (index % \
+                                (FLASHPAGE_SIZE / rk_sz_pad));
     uint8_t page[FLASHPAGE_SIZE];
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
@@ -1193,12 +1216,15 @@ static uint8_t load_rk(uint16_t index, ctap_key_t *rk)
 
 static void save_state(ctap_state_t * state)
 {
-    uint8_t page[FLASHPAGE_SIZE];
+    /* buffer has to be 4 byte aligned in order to write to flash */
+    uint8_t page[sizeof(*state) + (sizeof(state) % 4)];
     memset(page, 0, sizeof(page));
 
     memmove(page, state, sizeof(*state));
 
-    flashpage_write_and_verify(CTAP_RK_START_PAGE - 1, page);
+    ctap_flash_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page, sizeof(page));
+
+    //flashpage_write_and_verify(CTAP_RK_START_PAGE - 1, page);
 }
 
 /**
@@ -1263,7 +1289,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
                                     ctap_pub_key_cred_params_t *cred_params,
                                     ctap_auth_data_t* auth_data,
                                     ctap_key_t *k,
-                                    bool uv)
+                                    bool uv, bool up)
 {
     int ret;
      /* device aaguid */
@@ -1281,8 +1307,9 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
     /* set flag indicating that attested credential data included */
     auth_header->flags |= CTAP_AUTH_DATA_FLAG_AT;
 
-    /* todo: faking user presence because it is necessary for registration */
-    auth_header->flags |= CTAP_AUTH_DATA_FLAG_UP;
+    if (up) {
+        auth_header->flags |= CTAP_AUTH_DATA_FLAG_UP;
+    }
 
     if (uv) {
         auth_header->flags |= CTAP_AUTH_DATA_FLAG_UV;
