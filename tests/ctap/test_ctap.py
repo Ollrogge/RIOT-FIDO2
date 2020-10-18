@@ -7,7 +7,7 @@ from getpass import getpass
 from binascii import a2b_hex
 from hashlib import sha256
 import threading
-from time import sleep
+import time
 
 import unittest
 
@@ -31,8 +31,9 @@ def get_device():
     assert len(devs) == 1
     return devs[0]
 
-def make_credential(server, client, user):
-    create_options, state = server.register_begin(user)
+def make_credential(server, client, user, rk= None):
+    start = time.time_ns()
+    create_options, state = server.register_begin(user, resident_key= rk)
 
     attestation_object, client_data = client.make_credential(
         create_options["publicKey"])
@@ -40,14 +41,19 @@ def make_credential(server, client, user):
     auth_data = server.register_complete(state, client_data, attestation_object)
     credential = [auth_data.credential_data]
 
+    end = time.time_ns()
+    total_us = (end - start) // 1000
+    print("")
+    print(f"New Credential created. Took: {total_us} us")
+    print(credential)
+
     return credential
 
 def authenticate(server, client, credentials):
-
+    start = time.time_ns()
     request_options, state = server.authenticate_begin(credentials)
 
     assertions, client_data = client.get_assertion(request_options["publicKey"])
-    print("ASSERTIONS: ", assertions)
 
     for assertion in assertions:
         server.authenticate_complete(
@@ -58,6 +64,12 @@ def authenticate(server, client, credentials):
             assertion.auth_data,
             assertion.signature,
         )
+
+    end = time.time_ns()
+    total_us = (end - start) // 1000
+    print("")
+    print(f"Assertion done. Took {total_us} us")
+    print(assertions)
 
 class TestCtap(unittest.TestCase):
     @unittest.skip
@@ -96,7 +108,7 @@ class TestCtap(unittest.TestCase):
             return
 
         def send_cancel(dev):
-            sleep(0.25)
+            time.sleep(0.25)
             cmd = (TYPE_INIT | CTAPHID.CANCEL)
             send_init_packet(dev, cmd)
             print("1")
@@ -173,7 +185,7 @@ class TestCtap(unittest.TestCase):
         else:
             print("Device does not support CBOR")
 
-    #@unittest.skip
+    @unittest.skip
     def test_get_next_assertion(self):
         print()
         print("*** test_get_next_assertion ***")
@@ -198,14 +210,12 @@ class TestCtap(unittest.TestCase):
         print("User1 credential created")
 
         credential2 = make_credential(server, client, user2)[0]
-        print("User2 credential created")
 
         '''
         Authenticating both credentials.
 
         '''
         authenticate(server, client, [credential1, credential2])
-        print("Credentials authenticated !")
 
 
     @unittest.skip
@@ -241,8 +251,7 @@ class TestCtap(unittest.TestCase):
         authenticate(server, client, credential2)
         print("Credential2 authenticated!")
 
-
-    @unittest.skip
+    #@unittest.skip
     def test_make_credential_and_get_assertion(self):
         print()
         print("*** test_make_credential_and_get_assertion ***")
@@ -259,15 +268,13 @@ class TestCtap(unittest.TestCase):
 
         client = Fido2Client(dev, "https://example.com")
 
-        server = Fido2Server({"id": "example.com", "name": "Example RP"}, attestation="direct")
+        server = Fido2Server({"id": "example.com", "name": "Example RP"},
+                            attestation="direct")
         user = {"id": b"user_id", "name": "A. User"}
 
-        credential = make_credential(server, client, user)
-        print("New credential created!")
-
+        credential = make_credential(server, client, user, True)
+        credential = make_credential(server, client, user, True)
         authenticate(server, client, credential)
-        print("Credential authenticated!")
-
 
     @unittest.skip
     def test_make_credential_and_get_assertion_PIN(self):
