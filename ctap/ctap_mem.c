@@ -1,5 +1,4 @@
 #include "periph/flashpage.h"
-#include "assert.h"
 
 #include "xtimer.h"
 #define ENABLE_DEBUG    (0)
