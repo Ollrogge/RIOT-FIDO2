@@ -429,9 +429,7 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         up = true;
     }
 
-    if (req.options.rk) {
-        rk = true;
-    }
+    rk = req.options.rk;
 
     ret = make_auth_data_attest(&req.rp, &req.user, &req.cred_params,
                                 &auth_data, &k, uv, up, rk);
@@ -447,16 +445,12 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
-    DEBUG("before save rk \n");
-
     if (rk) {
         ret = save_rk(&k);
         if (ret != CTAP2_OK) {
             return ret;
         }
     }
-
-    DEBUG("Save rk done \n");
 
     return CTAP2_OK;
 }
@@ -620,8 +614,6 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         up = true;
         g_assert_state.up = true;
     }
-
-    g_assert_state.up = true;
 
     if (!g_assert_state.count) {
         return CTAP2_ERR_NO_CREDENTIALS;
@@ -1322,12 +1314,10 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
 {
     int ret;
-
-    /* encrypt everything except id of resident key */
-    size_t sz = sizeof(*rk) - sizeof(rk->cred_desc.cred_id);
     memset(id, 0, sizeof(id));
 
-    ret = ctap_crypto_aes_ccm_enc((uint8_t *)id, (uint8_t *)rk, sz, NULL, 0,
+    ret = ctap_crypto_aes_ccm_enc((uint8_t *)id, (uint8_t *)rk,
+                                CTAP_CREDENTIAL_ID_ENC_SIZE, NULL, 0,
                                 CTAP_AES_CCM_MAC_SIZE, CTAP_AES_CCM_L, n,
                                 g_state.cred_key);
 
@@ -1336,7 +1326,7 @@ uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
         return ret;
     }
 
-    memmove(id->nonce, n, sizeof(id->nonce));
+    memmove(id->nonce, n, CTAP_AES_CCM_NONCE_SIZE);
 
     return CTAP2_OK;
 }
@@ -1344,6 +1334,8 @@ uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
 static uint8_t ctap_decrypt_rk(ctap_resident_key_t *rk, ctap_cred_id_t *id)
 {
     int ret;
+
+    memset(rk, 0, sizeof(*rk));
 
     ret = ctap_crypto_aes_ccm_dec((uint8_t *)rk, (uint8_t *)id,
                                   sizeof(id->id) + sizeof(id->mac), NULL, 0,
@@ -1355,8 +1347,7 @@ static uint8_t ctap_decrypt_rk(ctap_resident_key_t *rk, ctap_cred_id_t *id)
     }
 
     /* store nonce in key to be able to encrypt again */
-    memmove(rk->cred_desc.nonce, id->nonce, sizeof(rk->cred_desc.nonce));
-
+    memmove(rk->cred_desc.nonce, id->nonce, CTAP_AES_CCM_NONCE_SIZE);
     rk->cred_desc.has_nonce = true;
 
     return CTAP2_OK;

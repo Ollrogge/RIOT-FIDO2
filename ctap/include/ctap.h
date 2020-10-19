@@ -223,10 +223,12 @@ extern "C" {
 /**
  * @brief total size of AES CCM credential id
  *
- * @note size has to be adjusted if resident key struct grows
+ * @note size of encrypted resident key - cred id - has_nonce - sign_count
  */
 #define CTAP_CREDENTIAL_ID_ENC_SIZE (sizeof(struct ctap_resident_key) - \
-                                     CTAP_CREDENTIAL_ID_SIZE)
+                    sizeof(((struct ctap_resident_key*)0)->cred_desc.cred_id) - \
+                    sizeof(((struct ctap_resident_key*)0)->cred_desc.has_nonce) - \
+                    sizeof(((struct ctap_resident_key*)0)->sign_count))
 
 /**
  * @brief Start page for storing resident keys
@@ -578,11 +580,11 @@ typedef struct
  */
 struct __attribute__((packed)) ctap_resident_key
 {
-    ctap_cred_desc_t cred_desc;
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
     uint8_t user_id_len;
     uint8_t priv_key[32];
+    ctap_cred_desc_t cred_desc;
     uint32_t sign_count;
 };
 

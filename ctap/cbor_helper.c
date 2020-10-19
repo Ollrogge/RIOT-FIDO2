@@ -141,6 +141,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     CborEncoder map;
     uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
     size_t sig_buf_len = sizeof(sig_buf);
+    ctap_cred_id_t id;
 
     uint8_t map_len = valid_cred_count > 1 ? 5 : 4;
 
@@ -153,7 +154,6 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     ctap_cred_desc_t *cred_desc = &rk->cred_desc;
 
     if (cred_desc->has_nonce) {
-        ctap_cred_id_t id;
         ret = ctap_encrypt_rk(rk, rk->cred_desc.nonce, &id);
 
         if (ret != CTAP2_OK) {
@@ -176,8 +176,12 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     /* get signature for assertion */
-    ctap_get_attest_sig((uint8_t*)auth_data, sizeof(*auth_data), client_data_hash,
-                        rk, sig_buf, &sig_buf_len);
+    ret = ctap_get_attest_sig((uint8_t*)auth_data, sizeof(*auth_data),
+                            client_data_hash, rk, sig_buf, &sig_buf_len);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     ret = cbor_encode_int(&map, CTAP_GA_RESP_SIGNATURE);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -297,8 +301,6 @@ static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr, bool rk)
     CborEncoder desc;
     int ret;
 
-    ctap_cred_desc_t *cred_desc = (ctap_cred_desc_t *)cred_ptr;
-
     ret = cbor_encoder_create_map(encoder, &desc, 2);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
@@ -316,15 +318,10 @@ static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr, bool rk)
                                       sizeof(*id));
     }
 
-    ret = cbor_encode_byte_string(&desc, cred_desc->cred_id, sizeof(cred_desc->cred_id));
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
     ret = cbor_encode_text_string(&desc, "type", 4);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-
-    if (cred_desc->cred_type != CTAP_PUB_KEY_CRED_PUB_KEY) {
-        return CTAP2_ERR_UNSUPPORTED_ALGORITHM;
-    }
 
     ret = cbor_encode_text_string(&desc, "public-key", 10);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -1186,7 +1183,7 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_alt_t *cred)
     ret = cbor_value_copy_byte_string(&val, (uint8_t *)&cred->cred_id, &buf_len, NULL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    if (buf_len != sizeof(cred->cred_id)) return CTAP2_ERR_MISSING_PARAMETER;
+    if (buf_len < CTAP_CREDENTIAL_ID_SIZE) return CTAP2_ERR_MISSING_PARAMETER;
 
     ret = cbor_value_advance(arr);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
