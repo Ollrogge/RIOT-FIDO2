@@ -15,7 +15,7 @@
 #include "periph/gpio.h"
 #include "ctap_mem.h"
 
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 #define CTAP_TESTING 1
@@ -447,12 +447,16 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
+    DEBUG("before save rk \n");
+
     if (rk) {
         ret = save_rk(&k);
         if (ret != CTAP2_OK) {
             return ret;
         }
     }
+
+    DEBUG("Save rk done \n");
 
     return CTAP2_OK;
 }
@@ -1088,7 +1092,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk_temp;
     bool equal = false;
-    size_t rk_sz_pad = sizeof(*rk) + sizeof(*rk) % 4;
+    size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
     uint8_t buf[rk_sz_pad];
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
@@ -1120,7 +1124,6 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     memset(buf, 0, sizeof(buf));
     memmove(buf, rk, sizeof(*rk));
     if (!equal) {
-
         if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset,
             page_offset_into_page, buf, sizeof(buf)) != FLASHPAGE_OK)
         {
@@ -1148,7 +1151,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
 
 static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 {
-    size_t rk_sz_pad = sizeof(*rk) + sizeof(*rk) % 4;
+    size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
     uint16_t page_offset = index / (FLASHPAGE_SIZE / rk_sz_pad);
     uint16_t page_offset_into_page = rk_sz_pad * (index % \
                                 (FLASHPAGE_SIZE / rk_sz_pad));
@@ -1170,14 +1173,12 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 static void save_state(ctap_state_t * state)
 {
     /* buffer has to be 4 byte aligned in order to write to flash */
-    uint8_t page[sizeof(*state) + (sizeof(state) % 4)];
+    uint8_t page[sizeof(*state) + 4 - sizeof(state) % 4];
     memset(page, 0, sizeof(page));
 
     memmove(page, state, sizeof(*state));
 
     ctap_flash_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page, sizeof(page));
-
-    //flashpage_write_and_verify(CTAP_RK_START_PAGE - 1, page);
 }
 
 /**

@@ -231,7 +231,7 @@ extern "C" {
 /**
  * @brief Start page for storing resident keys
  */
-#define CTAP_RK_START_PAGE 30U
+#define CTAP_RK_START_PAGE 40U
 
 /**
  * @brief Max amount of resident keys we can store
@@ -449,7 +449,7 @@ extern "C" {
  * @brief CTAP size of credential id
  *
  */
-#define CTAP_CREDENTIAL_ID_SIZE 16
+#define CTAP_CREDENTIAL_ID_SIZE 16U
 
 /**
  * @brief CTAP size of authenticator AAGUID
@@ -571,17 +571,6 @@ typedef struct
     int32_t alg_type;    /**< COSEAlgorithmIdentifier */
     uint8_t cred_type;  /**< type of credential */
 } ctap_cose_key_t;
-
-struct __attribute__((packed)) ctap_nonresident_key
-{
-    struct {
-        uint8_t cred_type;
-    } cred_desc;
-    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
-    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
-    uint8_t user_id_len;
-    uint8_t priv_key[32];
-};
 
 /**
  * @brief CTAP resident key struct
