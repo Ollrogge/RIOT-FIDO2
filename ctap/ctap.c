@@ -18,8 +18,6 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
-#define CTAP_TESTING 1
-
 static uint8_t get_info(CborEncoder *encoder);
 static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_raw,
                                bool (*should_cancel)(void));
@@ -321,7 +319,7 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
             resp->status, cbor_encoder_get_buffer_size(&encoder, buf));
             return cbor_encoder_get_buffer_size(&encoder, buf);
             break;
-#ifdef CTAP_TESTING
+#ifdef CONFIG_CTAP_TESTING
         case CTAP_RESET:
             DEBUG("CTAP RESET \n");
             reset();
@@ -425,9 +423,13 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
     }
 
     /* todo: add macro to disable user presence test */
+#ifdef CONFIG_CTAP_BENCHMARKS
+    up = true;
+#else
     if (user_presence_test() == CTAP2_OK) {
         up = true;
     }
+#endif
 
     rk = req.options.rk;
 
@@ -610,10 +612,15 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
      /* todo: add macro to disable user presence test */
+#ifdef CONFIG_CTAP_BENCHMARKS
+    up = true;
+    g_assert_state.up = true;
+#else
     if (user_presence_test() == CTAP2_OK) {
         up = true;
         g_assert_state.up = true;
     }
+#endif
 
     if (!g_assert_state.count) {
         return CTAP2_ERR_NO_CREDENTIALS;
@@ -817,7 +824,8 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
         return CTAP2_ERR_PIN_BLOCKED;
     }
 
-    if (!req->pin_auth_present || !req->key_agreement_present || !req->pin_hash_enc_present) {
+    if (!req->pin_auth_present || !req->key_agreement_present ||
+        !req->pin_hash_enc_present) {
         return CTAP2_ERR_MISSING_PARAMETER;
     }
 
@@ -852,7 +860,7 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
     }
 
     sha256_init(&ctx);
-    sha256_update(&ctx, pin_hash_dec, 16);
+    sha256_update(&ctx, pin_hash_dec, sizeof(pin_hash_dec));
     sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
     sha256_final(&ctx, pin_hash_dec_final);
 
@@ -900,7 +908,6 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
     uint8_t new_pin_dec[CTAP_PIN_MAX_SIZE];
     int new_pin_dec_len = sizeof(new_pin_dec);
     int ret;
-    //todo: check if pin is already set, error if it is.
 
     if (pin_is_set()) {
         return CTAP2_ERR_NOT_ALLOWED;
@@ -990,7 +997,7 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
     }
 
     sha256_init(&ctx),
-    sha256_update(&ctx, pin_hash_dec, 16);
+    sha256_update(&ctx, pin_hash_dec, sizeof(pin_hash_dec));
     sha256_update(&ctx, g_state.pin_salt, sizeof(g_state.pin_salt));
     sha256_final(&ctx, pin_hash_dec_final);
 
@@ -1084,6 +1091,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk_temp;
     bool equal = false;
+    /* ensure 4 byte alignment */
     size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
     uint8_t buf[rk_sz_pad];
 
@@ -1143,6 +1151,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
 
 static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 {
+    /* ensure 4 byte alignment */
     size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
     uint16_t page_offset = index / (FLASHPAGE_SIZE / rk_sz_pad);
     uint16_t page_offset_into_page = rk_sz_pad * (index % \
@@ -1164,7 +1173,7 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 
 static void save_state(ctap_state_t * state)
 {
-    /* buffer has to be 4 byte aligned in order to write to flash */
+    /* ensure 4 byte alignment */
     uint8_t page[sizeof(*state) + 4 - sizeof(state) % 4];
     memset(page, 0, sizeof(page));
 
@@ -1294,7 +1303,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
         cred_header->cred_len_l = CTAP_CREDENTIAL_ID_SIZE & 0x00ff;
     }
     else {
-        /* generate credential id from resident key */
+        /* generate credential id by encrypting resident key */
         uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];
         ctap_crypto_prng(nonce, sizeof(nonce));
 
@@ -1322,7 +1331,6 @@ uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
                                 g_state.cred_key);
 
     if (ret != CTAP2_OK) {
-        DEBUG("aes_ccm_enc failure \n");
         return ret;
     }
 
