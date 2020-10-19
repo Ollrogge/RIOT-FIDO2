@@ -1,7 +1,7 @@
 
 #include "cbor_helper.h"
 
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp);
@@ -241,7 +241,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     memmove(auth_data_buf, (void*)&auth_data->header, sizeof(ctap_auth_data_header_t));
     offset += sizeof(ctap_auth_data_header_t);
     memmove(auth_data_buf + offset, (void*)cred_header, cred_header_sz);
-    offset += cred_id_sz;
+    offset += cred_header_sz;
 
     cose_key_buf = auth_data_buf + offset;
 
