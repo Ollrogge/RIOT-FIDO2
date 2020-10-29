@@ -233,13 +233,17 @@ extern "C" {
 /**
  * @brief Start page for storing resident keys
  */
-#define CTAP_RK_START_PAGE 40U
+#define CTAP_RK_START_PAGE 32U
+
+#define CTAP_FLASH_ALIGN_PAD (4 - sizeof(struct ctap_resident_key) % 4)
+
+#define CTAP_PAD_RK_SZ (sizeof(struct ctap_resident_key) + CTAP_FLASH_ALIGN_PAD)
 
 /**
  * @brief Max amount of resident keys we can store
  */
 #define CTAP_MAX_RK (((FLASHPAGE_NUMOF - CTAP_RK_START_PAGE) * FLASHPAGE_SIZE) /  \
-                    sizeof(struct ctap_resident_key))
+                    CTAP_PAD_RK_SZ)
 
 /**
  * @brief Timeout for user presence test
@@ -247,7 +251,7 @@ extern "C" {
 #define CTAP_UP_TIMEOUT (15 * US_PER_SEC)
 
 /**
- * @brief Max time between call to get_assertion /
+ * @brief Max time between call to get_assertion or
  * get_next_assertion
  */
 #define CTAP_GET_NEXT_ASSERTION_TIMEOUT (30 * US_PER_SEC)

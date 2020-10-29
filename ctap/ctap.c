@@ -48,7 +48,7 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *k);
 static bool ks_are_equal(ctap_resident_key_t *k1, ctap_resident_key_t *k2);
 static int cred_cmp(const void *a, const void *b);
 static uint8_t save_pin(uint8_t *pin, size_t len);
-static void save_state(ctap_state_t *state);
+static int save_state(ctap_state_t *state);
 static void load_state(ctap_state_t *state);
 static bool pin_is_set(void);
 static bool pin_protocol_supported(uint8_t version);
@@ -498,7 +498,7 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
             cred_desc = &allow_list[i];
             ret = ctap_decrypt_rk(&rks[index], &cred_desc->cred_id);
             if (ret == CTAP2_OK) {
-                if (memcmp(rks[index].rp_id_hash, rk.rp_id_hash,
+                if (memcmp(rks[index].rp_id_hash, rp_id_hash,
                     SHA256_DIGEST_LENGTH) == 0) {
                     index++;
                 }
@@ -545,7 +545,9 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
     }
 
     /* sort ascending order based on sign count */
-    qsort(rks, index, sizeof(ctap_resident_key_t), cred_cmp);
+    if (g_state.rk_amount_stored > 0) {
+        qsort(rks, index, sizeof(ctap_resident_key_t), cred_cmp);
+    }
 
     return index;
 }
@@ -611,7 +613,6 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         g_assert_state.uv = true;
     }
 
-     /* todo: add macro to disable user presence test */
 #ifdef CONFIG_CTAP_BENCHMARKS
     up = true;
     g_assert_state.up = true;
@@ -662,8 +663,6 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return ret;
     }
 
-    g_state.sign_count++;
-
     if (!rk->cred_desc.has_nonce) {
         rk->sign_count++;
         ret = save_rk(rk);
@@ -671,6 +670,12 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         if (ret != CTAP2_OK) {
             return ret;
         }
+    }
+
+    g_state.sign_count++;
+    ret = save_state(&g_state);
+    if (ret != CTAP2_OK) {
+        return ret;
     }
 
     g_assert_state.timer = xtimer_now_usec();
@@ -708,7 +713,6 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
     rk = &g_assert_state.rks[g_assert_state.cred_counter];
     g_assert_state.cred_counter++;
 
-
     if (rk->cred_desc.has_nonce) {
         ret = make_auth_data_next_assert(rk->rp_id_hash, &auth_data,
                                     g_assert_state.uv, g_assert_state.up,
@@ -745,6 +749,10 @@ static uint8_t get_next_assertion(CborEncoder *encoder, size_t size,
     }
 
     g_state.sign_count++;
+    ret = save_state(&g_state);
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
 
     return CTAP2_OK;
 }
@@ -1091,9 +1099,8 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk_temp;
     bool equal = false;
-    /* ensure 4 byte alignment */
-    size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
-    uint8_t buf[rk_sz_pad];
+    uint8_t buf[CTAP_PAD_RK_SZ];
+    int ret;
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
         return CTAP2_ERR_KEY_STORE_FULL;
@@ -1102,9 +1109,9 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     if (g_state.rk_amount_stored != 0) {
          /* <= is intended. */
         for (uint16_t i = 0; i <= g_state.rk_amount_stored; i++) {
-            page_offset = i / (FLASHPAGE_SIZE / rk_sz_pad);
-            page_offset_into_page = rk_sz_pad * (i % \
-                                    (FLASHPAGE_SIZE / rk_sz_pad));
+            page_offset = i / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
+            page_offset_into_page = CTAP_PAD_RK_SZ * (i % \
+                                    (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ));
 
             /* beginning of a new page, read from flash */
             if (page_offset_into_page == 0) {
@@ -1112,6 +1119,10 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
             }
 
             memmove(&rk_temp, page + page_offset_into_page, sizeof(rk_temp));
+
+            if (i == g_state.rk_amount_stored) {
+                break;
+            }
 
             /* if equal, overwrite */
             if (ks_are_equal(&rk_temp, rk)) {
@@ -1123,12 +1134,20 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
 
     memset(buf, 0, sizeof(buf));
     memmove(buf, rk, sizeof(*rk));
+
     if (!equal) {
         if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset,
             page_offset_into_page, buf, sizeof(buf)) != FLASHPAGE_OK)
         {
             DEBUG("ctap save rk: flash write failed \n");
             return CTAP1_ERR_OTHER;
+        }
+
+        g_state.rk_amount_stored++;
+        ret = save_state(&g_state);
+
+        if (ret != CTAP2_OK) {
+            return ret;
         }
     }
     else {
@@ -1141,21 +1160,14 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
         }
     }
 
-    if (!equal) {
-        g_state.rk_amount_stored++;
-        save_state(&g_state);
-    }
-
     return CTAP2_OK;
 }
 
 static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 {
-    /* ensure 4 byte alignment */
-    size_t rk_sz_pad = sizeof(*rk) + 4 - sizeof(*rk) % 4;
-    uint16_t page_offset = index / (FLASHPAGE_SIZE / rk_sz_pad);
-    uint16_t page_offset_into_page = rk_sz_pad * (index % \
-                                (FLASHPAGE_SIZE / rk_sz_pad));
+    uint16_t page_offset = index / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
+    uint16_t page_offset_into_page = CTAP_PAD_RK_SZ * (index % \
+                                (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ));
     uint8_t page[FLASHPAGE_SIZE];
 
     if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
@@ -1171,7 +1183,7 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
     return CTAP2_OK;
 }
 
-static void save_state(ctap_state_t * state)
+static int save_state(ctap_state_t * state)
 {
     /* ensure 4 byte alignment */
     uint8_t page[sizeof(*state) + 4 - sizeof(state) % 4];
@@ -1179,7 +1191,8 @@ static void save_state(ctap_state_t * state)
 
     memmove(page, state, sizeof(*state));
 
-    ctap_flash_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page, sizeof(page));
+    return ctap_flash_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page,
+            sizeof(page));
 }
 
 /**
@@ -1192,7 +1205,7 @@ static void load_state(ctap_state_t *state)
 {
     uint8_t page[FLASHPAGE_SIZE];
 
-    flashpage_read(19, page);
+    flashpage_read(CTAP_RK_START_PAGE - 1, page);
 
     memmove(state, page, sizeof(*state));
 }
