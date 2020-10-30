@@ -25,11 +25,8 @@
 #include <stdint.h>
 
 #include "mutex.h"
-
 #include "cbor.h"
-
 #include "assert.h"
-
 #include "hashes/sha256.h"
 
 #ifdef __cplusplus
@@ -777,11 +774,6 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                            bool (*should_cancel)(void));
 
 /**
- * @brief Initialize ctap and load state
- */
-void ctap_init(void);
-
-/**
  * @brief Create attestation signature
  *
  * @param[in] auth_data         authenticator data
@@ -808,6 +800,16 @@ uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len,
 bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type);
 
 uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id);
+
+/**
+ * @brief Create threads needed for ctap
+ */
+void ctap_create(void);
+
+/**
+ * @brief Initialize ctap
+ */
+void ctap_init(void);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,16 @@
+FEATURES_REQUIRED += periph_flashpage
+FEATURES_REQUIRED += periph_gpio_irq
+
+USEMODULE += ctap_trans
+EXTERNAL_MODULE_DIRS += ./ctap/ctap_trans
+INCLUDES += -I$(CURDIR)/ctap/ctap_trans/include
+INCLUDES += -I$(CURDIR)/ctap/ctap_trans/ctap_hid/include
+
+USEPKG += tinycbor
+USEPKG += relic
+INCLUDES += -I$(PKGDIRBASE)/relic/src/bc
+
+USEMODULE += crypto_aes
+USEMODULE += cipher_modes
+USEMODULE += hashes
+USEMODULE += fmt

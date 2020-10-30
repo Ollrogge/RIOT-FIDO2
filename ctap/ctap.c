@@ -3,8 +3,9 @@
 #include <assert.h>
 
 #include "fmt.h"
+#include "periph/gpio.h"
 #include "ctap.h"
-#include "ctap_hid.h"
+#include "ctap_trans.h"
 #include "cbor_helper.h"
 #include "ctap_crypto.h"
 #include "xtimer.h"
@@ -74,6 +75,11 @@ static uint8_t g_pin_token[CTAP_PIN_TOKEN_SIZE];
 static uint8_t g_rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
 static bool g_user_present = false;
 
+void ctap_create(void)
+{
+    ctap_trans_init();
+}
+
 void ctap_init(void)
 {
     int ret;
@@ -138,7 +144,9 @@ static uint8_t user_presence_test(void)
     uint32_t diff = 0;
     uint32_t delay = (500 * US_PER_MS);
 
-    ctap_hid_send_keepalive(CTAP_HID_STATUS_UPNEEDED);
+#ifdef CONFIG_CTAP_USB
+    ctap_trans_write_keepalive(CTAP_TRANS_USB, CTAP_HID_STATUS_UPNEEDED);
+#endif
 
     if (gpio_init_int(BTN0_PIN, BTN0_MODE, GPIO_FALLING, gpio_cb, NULL) < 0) {
         return CTAP1_ERR_OTHER;

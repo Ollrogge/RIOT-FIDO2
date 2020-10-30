@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "usb/usbus.h"
+#include "ctap_trans.h"
 #include "ctap_hid.h"
 #include "ctap.h"
 #include "cbor.h"
@@ -50,13 +50,7 @@ static void* pkt_worker(void* pkt_raw);
 static char stack[2048];
 static void* pkt_loop(void* arg);
 
-static usbus_t usbus;
-static char usb_stack[USBUS_STACKSIZE];
-
 static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
-
-void usb_hid_io_init(usbus_t* usbus, uint8_t* report_desc, size_t report_desc_size);
-ssize_t usb_hid_io_write(const void* buffer, size_t size);
 
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
 static void send_error_response(uint32_t cid, uint8_t err);
@@ -77,8 +71,6 @@ static uint16_t get_packet_len(ctap_hid_pkt_t* pkt);
 static void reset_ctap_buffer(void);
 
 static void check_timeouts(void);
-
-int usb_hid_io_read_timeout(void* buffer, size_t size, uint32_t timeout);
 
 static mutex_t is_busy_mutex;
 static bool is_busy = false;
@@ -254,7 +246,8 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
             ctap_buffer.offset += left;
         }
         else {
-            memmove(ctap_buffer.buffer + ctap_buffer.offset, pkt->cont.payload, CTAP_HID_CONT_PAYLOAD_SIZE);
+            memmove(ctap_buffer.buffer + ctap_buffer.offset, pkt->cont.payload,
+            CTAP_HID_CONT_PAYLOAD_SIZE);
             ctap_buffer.offset += CTAP_HID_CONT_PAYLOAD_SIZE;
         }
     }
@@ -265,23 +258,16 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
 
 void ctap_hid_create(void)
 {
-    usbdev_t *usbdev = usbdev_get_ctx(0);
-    assert(usbdev);
-    usbus_init(&usbus, usbdev);
-    usb_hid_io_init(&usbus, report_desc_ctap, sizeof(report_desc_ctap));
-
-    DEBUG("Starting usbus thread \n");
-    usbus_create(usb_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
+    ctap_trans_create(CTAP_TRANS_USB , report_desc_ctap, sizeof(report_desc_ctap));
 
     mutex_init(&is_busy_mutex);
 
-    DEBUG("Creating ctap_hid main thread \n");
-    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN -2, 0, pkt_loop,
-                                NULL, "ctap_hid_main");
-
     DEBUG("Creating ctap_hid worker thread \n");
-    worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -1,
-                               THREAD_CREATE_SLEEPING, pkt_worker, NULL, "ctap_hid_pkt_worker");
+    worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -1, THREAD_CREATE_SLEEPING, pkt_worker, NULL, "ctap_hid_pkt_worker");
+
+    DEBUG("Creating ctap_hid main thread \n");
+    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN-2, 0, pkt_loop,
+                                NULL, "ctap_hid_main");
 
 }
 
@@ -293,8 +279,6 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     uint8_t status = CTAP_HID_BUFFER_STATUS_BUFFERING;
 
     mutex_lock(&is_busy_mutex);
-
-    DEBUG("ctap_hid_handle_packet: 0x%08lx %d \n", cid, is_busy);
 
     if (cid == 0x00) {
         /* cid = 0x00 always invalid */
@@ -363,7 +347,8 @@ static void* pkt_loop(void* arg)
     int read;
 
     while (1) {
-        read = usb_hid_io_read_timeout(buffer, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
+        read = ctap_trans_read_timeout(CTAP_TRANS_USB , buffer,
+        CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
 
         if (read == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
             ctap_hid_handle_packet(buffer);
@@ -528,8 +513,16 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
         return;
     }
 
+    uint32_t start, end;
+
+    uint8_t type = *payload;
+
     memset(&resp, 0, sizeof(ctap_resp_t));
+    start = xtimer_now_usec();
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
+    end = xtimer_now_usec();
+
+    DEBUG("OPERATION TOOK: %lu usec type: %u \n", end - start, type);
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */
@@ -543,7 +536,8 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
 void ctap_hid_send_keepalive(uint8_t status)
 {
-    ctap_hid_write(CTAP_HID_COMMAND_KEEPALIVE, ctap_buffer.cid, &status, sizeof(status));
+    ctap_hid_write(CTAP_HID_COMMAND_KEEPALIVE, ctap_buffer.cid, &status,
+                   sizeof(status));
 }
 
 static void send_error_response(uint32_t cid, uint8_t err)
@@ -583,14 +577,16 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 
     memmove(buf, &cid, sizeof(cid));
     offset += sizeof(cid);
-    buf[4] = cmd;
-    buf[5] = (size & 0xff00) >> 8;
-    buf[6] = (size & 0xff) >> 0;
-    offset += 3;
+    buf[offset] = cmd;
+    offset++;
+    buf[offset] = (size & 0xff00) >> 8;
+    offset++;
+    buf[offset] = (size & 0xff) >> 0;
+    offset++;
 
     if (_data == NULL) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
-        usb_hid_io_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+        ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
         return;
     }
 
@@ -617,13 +613,13 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
         bytes_written += 1;
 
         if (offset == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
-            usb_hid_io_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+            ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
             offset = 0;
         }
     }
 
     if (offset > 0) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
-        usb_hid_io_write(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+         ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     }
 }

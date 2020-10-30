@@ -1,5 +1,8 @@
 MODULE = ctap
+SRCS += ctap.c
+SRCS += ctap_crypto.c
+SRCS += ctap_mem.c
+SRCS += ctap_helper.c
 
-INCLUDES += -I$(PKGDIRBASE)/relic/src/bc
 
 include $(RIOTBASE)/Makefile.base

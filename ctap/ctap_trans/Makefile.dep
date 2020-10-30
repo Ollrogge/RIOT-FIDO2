@@ -1,0 +1,3 @@
+USEMODULE += ctap_hid
+INCLUDES += -I$(CURDIR)/ctap/ctap_trans/ctap_hid/include
+EXTERNAL_MODULE_DIRS += $(CURDIR)/ctap/ctap_trans/ctap_hid
