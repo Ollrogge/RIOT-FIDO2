@@ -26,7 +26,12 @@
 #include "mutex.h"
 #include "timex.h"
 
+#ifdef CONFIG_CTAP_NATIVE
+#define CONFIG_USBUS_HID_INTERRUPT_EP_SIZE 0x40
+#include <stdbool.h>
+#else
 #include "usb/usbus/hid.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -29,6 +29,8 @@
 #include "assert.h"
 #include "hashes/sha256.h"
 
+#include "ctap_mem.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

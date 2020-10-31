@@ -3,18 +3,17 @@
 #include <assert.h>
 
 #include "fmt.h"
-#include "periph/gpio.h"
 #include "ctap.h"
 #include "ctap_trans.h"
 #include "cbor_helper.h"
 #include "ctap_crypto.h"
 #include "xtimer.h"
-#include "periph/flashpage.h"
 #include "relic.h"
 #include "rijndael-api-fst.h"
 #include "byteorder.h"
+#ifndef CONFIG_CTAP_NATIVE
 #include "periph/gpio.h"
-#include "ctap_mem.h"
+#endif
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
@@ -61,7 +60,9 @@ static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len);
 static bool locked(void);
 static bool boot_locked(void);
 static uint8_t user_presence_test(void);
+#ifndef CONFIG_CTAP_NATIVE
 static void gpio_cb(void *arg);
+#endif
 static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
                                 ctap_cred_desc_alt_t *allow_list,size_t allow_list_len,
                                 uint8_t* rp_id, size_t rp_id_len);
@@ -84,8 +85,12 @@ void ctap_init(void)
 {
     int ret;
     (void) ret;
+    (void) g_user_present;
 
     load_state(&g_state);
+
+    /* todo: what to do if init fails? */
+    ret = ctap_crypto_init();
 
     if (g_state.initialized != CTAP_INITIALIZED_MARKER) {
         g_state.initialized = CTAP_INITIALIZED_MARKER;
@@ -110,9 +115,6 @@ void ctap_init(void)
         save_state(&g_state);
     }
 
-    /* todo: what to do if init fails? */
-    ret = ctap_crypto_init();
-
      /* initialize pin_token */
     ctap_crypto_prng(g_pin_token, sizeof(g_pin_token));
 }
@@ -130,11 +132,13 @@ static void reset(void)
     save_state(&g_state);
 }
 
+#ifndef CONFIG_CTAP_NATIVE
 static void gpio_cb(void *arg)
 {
     (void)arg;
     g_user_present = true;
 }
+#endif
 
 static uint8_t user_presence_test(void)
 {
@@ -1123,7 +1127,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
 
             /* beginning of a new page, read from flash */
             if (page_offset_into_page == 0) {
-                flashpage_read(CTAP_RK_START_PAGE + page_offset, page);
+                ctap_flash_read(CTAP_RK_START_PAGE + page_offset, page);
             }
 
             memmove(&rk_temp, page + page_offset_into_page, sizeof(rk_temp));
@@ -1160,8 +1164,8 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     }
     else {
         memmove(page + page_offset_into_page, buf, sizeof(buf));
-        if (flashpage_write_and_verify(CTAP_RK_START_PAGE + page_offset, page)
-            != FLASHPAGE_OK)
+        if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset, 0,
+            page, sizeof(page)) != FLASHPAGE_OK)
         {
             DEBUG("ctap save rk: flash write failed \n");
             return CTAP1_ERR_OTHER;
@@ -1184,7 +1188,7 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 
     memset(page, 0, sizeof(page));
 
-    flashpage_read(CTAP_RK_START_PAGE + page_offset, page);
+    ctap_flash_read(CTAP_RK_START_PAGE + page_offset, page);
 
     memmove(rk, page + page_offset_into_page, sizeof(*rk));
 
@@ -1213,7 +1217,7 @@ static void load_state(ctap_state_t *state)
 {
     uint8_t page[FLASHPAGE_SIZE];
 
-    flashpage_read(CTAP_RK_START_PAGE - 1, page);
+    ctap_flash_read(CTAP_RK_START_PAGE - 1, page);
 
     memmove(state, page, sizeof(*state));
 }
@@ -1344,7 +1348,7 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
 uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
 {
     int ret;
-    memset(id, 0, sizeof(id));
+    memset(id, 0, sizeof(*id));
 
     ret = ctap_crypto_aes_ccm_enc((uint8_t *)id, (uint8_t *)rk,
                                 CTAP_CREDENTIAL_ID_ENC_SIZE, NULL, 0,

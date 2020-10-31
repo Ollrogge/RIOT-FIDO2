@@ -25,14 +25,23 @@
 
 #include <stdint.h>
 
+#ifndef CONFIG_CTAP_NATIVE
+#include "periph/flashpage.h"
+#else
+#define FLASHPAGE_SIZE 4096
+#define FLASHPAGE_NUMOF 256
+#define FLASHPAGE_OK 0
+#endif
+
 #include "ctap.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
 int ctap_flash_write_and_verify(int page, int offset, const void *data, size_t len);
+
+void ctap_flash_read(int page, void *data);
 
 
 #ifdef __cplusplus

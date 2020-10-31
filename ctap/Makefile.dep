@@ -1,5 +1,7 @@
-FEATURES_REQUIRED += periph_flashpage
-FEATURES_REQUIRED += periph_gpio_irq
+ifneq (native, $(BOARD))
+    FEATURES_REQUIRED += periph_flashpage
+    FEATURES_REQUIRED += periph_gpio_irq
+endif
 
 USEMODULE += ctap_trans
 EXTERNAL_MODULE_DIRS += ./ctap/ctap_trans

@@ -270,11 +270,15 @@ class TestCtap(unittest.TestCase):
 
         server = Fido2Server({"id": "example.com", "name": "Example RP"},
                             attestation="direct")
-        user = {"id": b"user_id", "name": "A. User"}
+        user1 = {"id": b"user_id", "name": "A. User"}
+        user2 = {"id": b"user_id2", "name": "A. User2"}
 
-        credential = make_credential(server, client, user, True)
-        credential = make_credential(server, client, user, True)
-        authenticate(server, client, credential)
+        # rk
+        credential1 = make_credential(server, client, user1, True)
+        # no rk
+        credential2 = make_credential(server, client, user2, False)
+        authenticate(server, client, credential1)
+        authenticate(server, client, credential2)
 
     @unittest.skip
     def test_make_credential_and_get_assertion_PIN(self):

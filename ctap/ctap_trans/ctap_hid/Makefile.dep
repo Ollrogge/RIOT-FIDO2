@@ -1,2 +1,4 @@
-USEMODULE += usbus_hid
-DISABLE_MODULE += auto_init_usbus
+ifneq (native, $(BOARD))
+    USEMODULE += usbus_hid
+    DISABLE_MODULE += auto_init_usbus
+endif

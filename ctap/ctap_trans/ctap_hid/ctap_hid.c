@@ -8,9 +8,7 @@
 #include "cbor.h"
 
 #include "thread.h"
-
 #include "xtimer.h"
-#include "board.h"
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
@@ -47,7 +45,11 @@ static kernel_pid_t worker_pid;
 static char worker_stack[16384];
 static void* pkt_worker(void* pkt_raw);
 
+#ifdef CONFIG_CTAP_NATIVE
+static char stack[16384];
+#else
 static char stack[2048];
+#endif
 static void* pkt_loop(void* arg);
 
 static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
@@ -266,14 +268,12 @@ void ctap_hid_create(void)
     worker_pid = thread_create(worker_stack, sizeof(worker_stack), THREAD_PRIORITY_MAIN -1, THREAD_CREATE_SLEEPING, pkt_worker, NULL, "ctap_hid_pkt_worker");
 
     DEBUG("Creating ctap_hid main thread \n");
-    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN-2, 0, pkt_loop,
+    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN, 0, pkt_loop,
                                 NULL, "ctap_hid_main");
-
 }
 
 void ctap_hid_handle_packet(uint8_t *pkt_raw)
 {
-
     ctap_hid_pkt_t *pkt = (ctap_hid_pkt_t*)pkt_raw;
     uint32_t cid = pkt->cid;
     uint8_t status = CTAP_HID_BUFFER_STATUS_BUFFERING;
@@ -330,7 +330,9 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw)
     else if (status == CTAP_HID_BUFFER_STATUS_DONE) {
         /*todo: mutex needed here too? */
         ctap_buffer.is_locked = 1;
-        thread_wakeup(worker_pid);
+        if (thread_wakeup(worker_pid) != 1) {
+            DEBUG("Thread weakup failed \n");
+        }
     }
     else {
         /* refresh timestamp of cid that is being buffered */
@@ -522,7 +524,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
     end = xtimer_now_usec();
 
-    DEBUG("OPERATION TOOK: %lu usec type: %u \n", end - start, type);
+    DEBUG("OPERATION TOOK: %u usec type: %u \n", end - start, type);
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */

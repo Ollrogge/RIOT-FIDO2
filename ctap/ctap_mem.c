@@ -1,15 +1,16 @@
-#include "periph/flashpage.h"
 
 #include "xtimer.h"
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 #include "ctap_mem.h"
 
+#ifndef CONFIG_CTAP_NATIVE
 static void ctap_flash_write_raw(int page, int offset,
                                 const void *data, size_t len);
 static int ctap_flash_verify(int page, int offset, const void *data, size_t len);
 static void ctap_flash_write(int page, const void *data, size_t len);
+#endif
 
 /*
 static void print_hex(uint8_t* data, size_t size)
@@ -22,6 +23,18 @@ static void print_hex(uint8_t* data, size_t size)
 }
 */
 
+void ctap_flash_read(int page, void *data)
+{
+    (void)page;
+    (void)data;
+
+#ifdef CONFIG_CTAP_NATIVE
+    return;
+#else
+    return flashpage_read(page, data);
+#endif
+}
+
 
 /**
  * write_raw should fail once for every page => erase page
@@ -32,6 +45,12 @@ static void print_hex(uint8_t* data, size_t size)
 int ctap_flash_write_and_verify(int page, int offset,
                                 const void *data, size_t len)
 {
+    (void)page;
+    (void)offset;
+    (void)data;
+    (void)len;
+
+#ifndef CONFIG_CTAP_NATIVE
     assert(!(len % FLASHPAGE_RAW_BLOCKSIZE));
 
     ctap_flash_write_raw(page, offset, data, len);
@@ -40,13 +59,17 @@ int ctap_flash_write_and_verify(int page, int offset,
         ctap_flash_write(page, data, len);
         return ctap_flash_verify(page, offset, data, len);
     }
-
     return FLASHPAGE_OK;
+#else
+    return 0;
+#endif
 }
 
+#ifndef CONFIG_CTAP_NATIVE
 static void ctap_flash_write_raw(int page, int offset,
                                 const void *data, size_t len)
 {
+
     uint32_t *addr = (uint32_t *)((uint8_t *)flashpage_addr(page) + offset);
     flashpage_write_raw(addr, data, len);
 }
@@ -91,5 +114,5 @@ static void ctap_flash_write(int page, const void *data, size_t len)
 
     end = xtimer_now_usec();
     DEBUG("Write2 raw took: %lu \n", end - start);
-
 }
+#endif
