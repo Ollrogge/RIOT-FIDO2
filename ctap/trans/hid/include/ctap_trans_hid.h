@@ -226,7 +226,7 @@ typedef struct
  * @brief Initialize USB, create needed threads
  *
  */
-void ctap_hid_create(void);
+void ctap_trans_hid_create(void);
 
 /**
  * @brief Handle CTAP_HID packet
@@ -234,7 +234,7 @@ void ctap_hid_create(void);
  * @param[in] pkt_raw   CTAP_HID packet
  *
  */
-void ctap_hid_handle_packet(uint8_t *pkt_raw);
+void ctap_trans_hid_handle_packet(uint8_t *pkt_raw);
 
 /**
  * @brief Send keepalive packet
@@ -242,7 +242,7 @@ void ctap_hid_handle_packet(uint8_t *pkt_raw);
  * @param[in] status    CTAP_HID status code
  *
  */
-void ctap_hid_send_keepalive(uint8_t status);
+void ctap_trans_hid_send_keepalive(uint8_t status);
 
 #ifdef __cplusplus
 }

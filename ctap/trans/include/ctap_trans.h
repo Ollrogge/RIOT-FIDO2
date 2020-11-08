@@ -6,7 +6,7 @@
 #include "timex.h"
 
 #ifdef CONFIG_CTAP_USB
-#include "ctap_hid.h"
+#include "ctap_trans_hid.h"
 #endif
 
 #ifdef __cplusplus
@@ -19,6 +19,7 @@ extern "C" {
 #define CTAP_TRANS_UDP 0x4
 
 void ctap_trans_init(void);
+
 uint8_t ctap_trans_create(uint8_t type, void* data, size_t len);
 
 int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t size,

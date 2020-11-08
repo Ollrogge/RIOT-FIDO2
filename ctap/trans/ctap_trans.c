@@ -15,16 +15,17 @@ static int ctap_trans_read_timeout_usb(void* buffer, size_t size,
 #include "usb/usbus.h"
 static char usb_stack[USBUS_STACKSIZE];
 static usbus_t usbus;
-void usb_hid_io_init(usbus_t* usbus, uint8_t* report_desc, size_t report_desc_size);
 ssize_t usb_hid_io_write(const void* buffer, size_t size);
 int usb_hid_io_read_timeout(void* buffer, size_t size, uint32_t timeout);
+void usb_hid_io_init(usbus_t *usbus, uint8_t *report_desc,
+                    size_t report_desc_size);
 #endif
 #endif
 
 void ctap_trans_init(void)
 {
 #ifdef CONFIG_CTAP_USB
-    ctap_hid_create();
+    ctap_trans_hid_create();
 #endif
 }
 
@@ -44,7 +45,10 @@ uint8_t ctap_trans_create(uint8_t type, void* data, size_t len)
 int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t len,
                             uint32_t timeout)
 {
-        switch (type) {
+    (void)buffer;
+    (void)len;
+    (void)timeout;
+    switch (type) {
 #ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
             return ctap_trans_read_timeout_usb(buffer, len, timeout);
@@ -57,6 +61,8 @@ int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t len,
 
 int ctap_trans_write(uint8_t type, const void *buffer, size_t len)
 {
+    (void)buffer;
+    (void)len;
     switch (type) {
 #ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
@@ -71,10 +77,11 @@ int ctap_trans_write(uint8_t type, const void *buffer, size_t len)
 
 void ctap_trans_write_keepalive(uint8_t type, uint8_t status)
 {
+    (void)status;
     switch (type) {
 #ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
-            ctap_hid_send_keepalive(status);
+            ctap_trans_hid_send_keepalive(status);
 #endif
         default:
             break;
@@ -89,14 +96,12 @@ static uint8_t create_usb(void* report_desc, size_t len)
     (void)len;
     ctap_udp_create();
 #else
-    DEBUG("ctap_trans: creating usb thread \n");
     usbdev_t *usbdev = usbdev_get_ctx(0);
     assert(usbdev);
     usbus_init(&usbus, usbdev);
-    usb_hid_io_init(&usbus, (uint8_t*)report_desc, len);
+    usb_hid_io_init(&usbus, report_desc, len);
 
     usbus_create(usb_stack, USBUS_STACKSIZE, USBUS_PRIO, USBUS_TNAME, &usbus);
-
 #endif
     return CTAP2_OK;
 }

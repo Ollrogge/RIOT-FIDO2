@@ -20,6 +20,7 @@ static int g_sockfd;
 
 void ctap_udp_create(void)
 {
+    DEBUG("ctap_udp_create \n");
 	struct sockaddr_in serveraddr;
 
     g_sockfd = socket(AF_INET, SOCK_DGRAM, 0);

@@ -1,0 +1,9 @@
+USEMODULE += ctap_trans_hid
+INCLUDES += -I$(CURDIR)/ctap/trans/hid/include
+EXTERNAL_MODULE_DIRS += $(CURDIR)/ctap/trans/hid
+
+ifeq (native, $(BOARD))
+    USEMODULE += ctap_udp
+    INCLUDES += -I$(CURDIR)/experimental/ctap_udp/include
+    EXTERNAL_MODULE_DIRS += $(CURDIR)/experimental/ctap_udp
+endif

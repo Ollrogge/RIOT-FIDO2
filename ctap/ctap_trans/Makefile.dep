@@ -1,6 +1,0 @@
-USEMODULE += ctap_hid
-USEMODULE += ctap_udp
-INCLUDES += -I$(CURDIR)/ctap/ctap_trans/ctap_hid/include
-EXTERNAL_MODULE_DIRS += $(CURDIR)/ctap/ctap_trans/ctap_hid
-INCLUDES += -I$(CURDIR)/experimental/ctap_udp/include
-EXTERNAL_MODULE_DIRS += $(CURDIR)/experimental/ctap_udp

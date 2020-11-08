@@ -1,5 +1,6 @@
 from utils import *
 import sys
+import os
 from udp_binding import force_udp_backend
 
 
@@ -82,7 +83,7 @@ def benchmark_get_assertion(dev, runs, creds):
 if __name__ == '__main__':
     assert len(sys.argv) >= 2
 
-    if len(sys.argv) == 3 and sys.argv[2] == 'UDP':
+    if 'UDP' in sys.argv:
         print("using UDP")
         force_udp_backend()
 
@@ -99,10 +100,12 @@ if __name__ == '__main__':
 
     runtimes_mc, runtimes_ga = benchmark_mc_ga(dev, runs)
 
+    path = sys.argv[2]
+
     runtimes_mc = "".join([f"{t}\n" for t in runtimes_mc])
-    with open("/home/h0ps/Uni/BachelorArbeit/Benchmarks/bechmark_mc_rk_RIOT.txt", 'w+') as f:
+    with open(f"{path}_mc", 'w+') as f:
         f.write(runtimes_mc)
 
     runtimes_ga = "".join([f"{t}\n" for t in runtimes_ga])
-    with open("/home/h0ps/Uni/BachelorArbeit/Benchmarks/bechmark_ga_rk_RIOT.txt", 'w+') as f:
+    with open(f"{path}_ga", 'w+') as f:
         f.write(runtimes_ga)

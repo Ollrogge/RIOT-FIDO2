@@ -39,9 +39,6 @@ def make_credential(server, client, user, rk= None):
 
     end = time.time_ns()
     total_us = (end - start) // 1000
-    print("")
-    print(f"New Credential created. Took: {total_us} us")
-    print(credential)
 
     return credential
 
@@ -63,6 +60,3 @@ def authenticate(server, client, credentials):
 
     end = time.time_ns()
     total_us = (end - start) // 1000
-    print("")
-    print(f"Assertion done. Took {total_us} us")
-    print(assertions)
