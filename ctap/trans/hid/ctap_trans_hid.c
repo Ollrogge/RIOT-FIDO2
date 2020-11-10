@@ -75,6 +75,8 @@ static void check_timeouts(void);
 static mutex_t is_busy_mutex;
 static bool is_busy = false;
 
+static ctap_trans_cb_t g_usb_out_cb;
+
 static uint8_t is_init_type_pkt(ctap_hid_pkt_t *pkt)
 {
     return ((pkt->init.cmd & CTAP_HID_INIT_PACKET) == CTAP_HID_INIT_PACKET);
@@ -191,18 +193,19 @@ static uint16_t get_packet_len(ctap_hid_pkt_t* pkt)
     return (uint16_t)((pkt->init.bcnth << 8) | pkt->init.bcntl);
 }
 
-void ctap_trans_hid_create(void)
+void ctap_trans_hid_create(ctap_trans_cb_t cb)
 {
-    ctap_trans_create(CTAP_TRANS_USB , report_desc_ctap, sizeof(report_desc_ctap));
+    g_usb_out_cb = cb;
+
+    ctap_trans_create(CTAP_TRANS_USB , report_desc_ctap,
+                    sizeof(report_desc_ctap), data_in_cb);
 
     mutex_init(&is_busy_mutex);
 
-    DEBUG("Creating ctap_hid worker thread \n");
     worker_pid = thread_create(worker_stack, sizeof(worker_stack),
                 THREAD_PRIORITY_MAIN -1, THREAD_CREATE_SLEEPING, pkt_worker,
                 NULL, "ctap_hid_pkt_worker");
 
-    DEBUG("Creating ctap_hid main thread \n");
     thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN, 0, pkt_loop,
                                 NULL, "ctap_hid_main");
 }
@@ -360,6 +363,13 @@ static void* pkt_loop(void* arg)
     }
 
     return (void*)0;
+}
+
+static void data_in_cb(uint8_t buffer, size_t len)
+{
+    if (len == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
+        ctap_trans_hid_handle_packet(buffer);
+    }
 }
 
 static void* pkt_worker(void* arg)
@@ -580,16 +590,13 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 
     memmove(buf, &cid, sizeof(cid));
     offset += sizeof(cid);
-    buf[offset] = cmd;
-    offset++;
-    buf[offset] = (size & 0xff00) >> 8;
-    offset++;
-    buf[offset] = (size & 0xff) >> 0;
-    offset++;
+    buf[offset++] = cmd;
+    buf[offset++] = (size & 0xff00) >> 8;
+    buf[offset++] = (size & 0xff) >> 0;
 
     if (_data == NULL) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
-        ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+        g_usb_out_cb(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
         return;
     }
 
@@ -616,13 +623,13 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
         bytes_written += 1;
 
         if (offset == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
-            ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+            g_usb_out_cb(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
             offset = 0;
         }
     }
 
     if (offset > 0) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
-         ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+        g_usb_out_cb(buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     }
 }

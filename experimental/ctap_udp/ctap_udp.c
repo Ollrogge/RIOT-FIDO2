@@ -16,23 +16,24 @@
 static const uint16_t PORT = 8111;
 static const uint16_t PORT_REMOTE = 7112;
 
+static void read_loop(ctap_trans_cb_t cb);
 static int g_sockfd;
 
-void ctap_udp_create(void)
+void ctap_udp_create(ctap_trans_cb_t cb)
 {
     DEBUG("ctap_udp_create \n");
 	struct sockaddr_in serveraddr;
+    int optval;
 
     g_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (g_sockfd < 0) {
         DEBUG("ERROR opening socket \n");
     }
 
-    struct timeval read_timeout;
-    read_timeout.tv_sec = 0;
-    read_timeout.tv_usec = 10;
-	if (setsockopt(g_sockfd, SOL_SOCKET, SO_RCVTIMEO,
-		&read_timeout, sizeof(struct timeval)) < 0) {
+
+    optval = 1;
+	if (setsockopt(g_sockfd, SOL_SOCKET, SO_REUSEADDR,
+		(const void *)&optval, sizeof(int))) {
         DEBUG("setsockopt error \n");
     }
 
@@ -44,29 +45,21 @@ void ctap_udp_create(void)
     if (bind(g_sockfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
         DEBUG("ERROR on binding \n");
     }
+
+    read_loop(cb);
 }
 
-int ctap_udp_read_timeout(void *buffer, size_t len, uint32_t timeout)
+static void read_loop(ctap_trans_cb_t cb)
 {
-    fd_set input;
-    FD_ZERO(&input);
-    FD_SET(g_sockfd, &input);
-    struct timeval to;
-    to.tv_sec = 0;
-    to.tv_usec = timeout;
-    int n = select(g_sockfd + 1, &input, NULL, NULL, &to);
-    if (n < 0) {
-        DEBUG("Select failed \n");
-    }
-    if (n == 0) {
-        return n;
-    }
+    int n;
+    uint8_t buf[0x40];
 
-    n = recvfrom(g_sockfd, buffer, len, 0, NULL, 0);
+    n = recvfrom(g_sockfd, buf, sizeof(buf), 0, NULL, 0);
     if (n < 0) {
         DEBUG("Recvfrom failed \n");
     }
-    return n;
+
+    cb(buf, sizeof(buf));
 }
 
 void ctap_udp_write(const void* buffer, size_t len)

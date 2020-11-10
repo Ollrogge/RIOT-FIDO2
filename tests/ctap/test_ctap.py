@@ -8,6 +8,8 @@ from binascii import a2b_hex
 from hashlib import sha256
 import threading
 import time
+import sys
+from udp_binding import force_udp_backend
 
 import unittest
 
@@ -253,6 +255,7 @@ class TestCtap(unittest.TestCase):
 
     #@unittest.skip
     def test_make_credential_and_get_assertion(self):
+        force_udp_backend()
         print()
         print("*** test_make_credential_and_get_assertion ***")
         try:

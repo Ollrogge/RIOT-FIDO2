@@ -18,9 +18,28 @@ extern "C" {
 #define CTAP_TRANS_BLE 0x3
 #define CTAP_TRANS_UDP 0x4
 
+typedef void (*ctap_trans_cb_t)(uint8_t *data, size_t len);
+
+typedef struct ctap_trans_data ctap_trans_data_t;
+
+typedef struct ctap_trans_io_t
+{
+    ctap_trans_cb_t in;
+    ctap_trans_cb_t out;
+};
+
+struct ctap_trans_data
+{
+    uint8_t trans_type;
+    uint8_t req_buf[256];
+    size_t size;
+    bool (*should_cancel)(void);
+};
+
 void ctap_trans_init(void);
 
-uint8_t ctap_trans_create(uint8_t type, void* data, size_t len);
+uint8_t ctap_trans_create(uint8_t type, void* data, size_t len,
+                            ctap_trans_cb_t cb);
 
 int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t size,
                             uint32_t timeout);

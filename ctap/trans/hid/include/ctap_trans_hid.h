@@ -226,7 +226,7 @@ typedef struct
  * @brief Initialize USB, create needed threads
  *
  */
-void ctap_trans_hid_create(void);
+void ctap_trans_hid_create(ctap_trans_cb_t cb);
 
 /**
  * @brief Handle CTAP_HID packet
