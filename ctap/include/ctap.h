@@ -477,6 +477,11 @@ extern "C" {
 #define CTAP_MAX_EXCLUDE_LIST_SIZE 0x10
 
 /**
+ * @brief size of keys based on the NIST-P256 curve
+ */
+#define CTAP_P256_KEY_SIZE 32
+
+/**
  * @brief CTAP resp struct forward declaration
  */
 typedef struct ctap_resp ctap_resp_t;
@@ -567,8 +572,8 @@ typedef struct
 typedef struct
 {
     struct {
-        uint8_t x[32];
-        uint8_t y[32];
+        uint8_t x[CTAP_P256_KEY_SIZE];
+        uint8_t y[CTAP_P256_KEY_SIZE];
     } pubkey;
 
     int kty;             /**< identification of key type */
@@ -583,12 +588,12 @@ typedef struct
  */
 struct __attribute__((packed)) ctap_resident_key
 {
-    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
-    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];
-    uint8_t user_id_len;
-    uint8_t priv_key[32];
-    ctap_cred_desc_t cred_desc;
-    uint32_t sign_count;
+    uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];   /**< hash of rp domain string */
+    uint8_t user_id[CTAP_USER_ID_MAX_SIZE];     /**< id of user */
+    uint8_t user_id_len;                        /**< length of the user id */
+    uint8_t priv_key[CTAP_P256_KEY_SIZE];       /**< private key */
+    ctap_cred_desc_t cred_desc;                 /**< credential descriptor */
+    uint32_t sign_count;                        /**< sign count */
 };
 
 /**
