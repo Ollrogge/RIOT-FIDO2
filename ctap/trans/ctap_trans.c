@@ -1,10 +1,9 @@
 #include "ctap.h"
 #include "ctap_trans.h"
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 #include "debug.h"
 
-#ifdef CONFIG_CTAP_USB
 static uint8_t create_usb(void* report_desc, size_t len);
 static void ctap_trans_write_usb(const void *buffer, size_t len);
 static int ctap_trans_read_timeout_usb(void* buffer, size_t size,
@@ -20,23 +19,47 @@ int usb_hid_io_read_timeout(void* buffer, size_t size, uint32_t timeout);
 void usb_hid_io_init(usbus_t *usbus, uint8_t *report_desc,
                     size_t report_desc_size);
 #endif
-#endif
+
+static char g_stack[16384];
+static void* pkt_loop(void* arg);
+static kernel_pid_t g_pid;
+
+static void* pkt_loop(void* arg)
+{
+    (void) arg;
+    ctap_init();
+
+    uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
+    int read;
+    while (1) {
+        read = ctap_trans_read_timeout(CTAP_TRANS_USB , buffer,
+        CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
+
+        if (read == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
+            ctap_trans_hid_handle_packet(buffer);
+        }
+
+        ctap_trans_hid_check_timeouts();
+    }
+
+    return (void*)0;
+}
 
 void ctap_trans_init(void)
 {
-#ifdef CONFIG_CTAP_USB
+    g_pid = thread_create(g_stack, sizeof(g_stack), THREAD_PRIORITY_MAIN, 0,
+                          pkt_loop, NULL, "ctap_trans_loop");
+    DEBUG("ctap_trans pkt loop created \n");
+
     ctap_trans_hid_create();
-#endif
 }
 
 uint8_t ctap_trans_create(uint8_t type, void* data, size_t len)
 {
     switch (type) {
-#ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
             return create_usb((uint8_t*)data, len);
             break;
-#endif
         default:
             return CTAP1_ERR_OTHER;
     }
@@ -45,15 +68,10 @@ uint8_t ctap_trans_create(uint8_t type, void* data, size_t len)
 int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t len,
                             uint32_t timeout)
 {
-    (void)buffer;
-    (void)len;
-    (void)timeout;
     switch (type) {
-#ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
             return ctap_trans_read_timeout_usb(buffer, len, timeout);
             break;
-#endif
         default:
             return -1;
     }
@@ -61,15 +79,11 @@ int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t len,
 
 int ctap_trans_write(uint8_t type, const void *buffer, size_t len)
 {
-    (void)buffer;
-    (void)len;
     switch (type) {
-#ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
             ctap_trans_write_usb(buffer, len);
             return 0;
             break;
-#endif
         default:
             return -1;
     }
@@ -77,24 +91,20 @@ int ctap_trans_write(uint8_t type, const void *buffer, size_t len)
 
 void ctap_trans_write_keepalive(uint8_t type, uint8_t status)
 {
-    (void)status;
     switch (type) {
-#ifdef CONFIG_CTAP_USB
         case CTAP_TRANS_USB:
             ctap_trans_hid_send_keepalive(status);
-#endif
         default:
             break;
     }
 }
 
-#ifdef CONFIG_CTAP_USB
 static uint8_t create_usb(void* report_desc, size_t len)
 {
 #ifdef CONFIG_CTAP_NATIVE
-    (void)report_desc;
-    (void)len;
-    ctap_udp_create();
+   (void)report_desc;
+   (void)len;
+   ctap_udp_create();
 #else
     usbdev_t *usbdev = usbdev_get_ctx(0);
     assert(usbdev);
@@ -123,4 +133,3 @@ static void ctap_trans_write_usb(const void *buffer, size_t len)
     usb_hid_io_write(buffer, len);
 #endif
 }
-#endif

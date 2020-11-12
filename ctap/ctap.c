@@ -15,7 +15,7 @@
 #include "periph/gpio.h"
 #endif
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 #include "debug.h"
 
 static uint8_t get_info(CborEncoder *encoder);
@@ -148,7 +148,7 @@ static uint8_t user_presence_test(void)
     uint32_t diff = 0;
     uint32_t delay = (500 * US_PER_MS);
 
-#ifdef CONFIG_CTAP_USB
+#ifndef CONFIG_CTAP_NATIVE
     ctap_trans_write_keepalive(CTAP_TRANS_USB, CTAP_HID_STATUS_UPNEEDED);
 #endif
 

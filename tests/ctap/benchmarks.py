@@ -87,6 +87,10 @@ if __name__ == '__main__':
         print("using UDP")
         force_udp_backend()
 
+    rk = False
+    if 'rk' in sys.argv:
+        rk = True
+
     devs = list(CtapHidDevice.list_devices())
     assert len(devs) == 1
 
@@ -98,7 +102,7 @@ if __name__ == '__main__':
     # reset state
     ctap.reset()
 
-    runtimes_mc, runtimes_ga = benchmark_mc_ga(dev, runs)
+    runtimes_mc, runtimes_ga = benchmark_mc_ga(dev, runs, rk = rk)
 
     path = sys.argv[2]
 

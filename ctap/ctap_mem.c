@@ -10,6 +10,7 @@ static void ctap_flash_write_raw(int page, int offset,
                                 const void *data, size_t len);
 static int ctap_flash_verify(int page, int offset, const void *data, size_t len);
 static void ctap_flash_write(int page, const void *data, size_t len);
+static bool is_erased(int page, int offset, size_t len);
 #endif
 
 /*
@@ -53,23 +54,35 @@ int ctap_flash_write_and_verify(int page, int offset,
 #ifndef CONFIG_CTAP_NATIVE
     assert(!(len % FLASHPAGE_RAW_BLOCKSIZE));
 
-    ctap_flash_write_raw(page, offset, data, len);
-
-    if (ctap_flash_verify(page, offset, data, len) != FLASHPAGE_OK) {
-        ctap_flash_write(page, data, len);
-        return ctap_flash_verify(page, offset, data, len);
+    if (is_erased(page, offset, len)) {
+        ctap_flash_write_raw(page, offset, data, len);
     }
-    return FLASHPAGE_OK;
+    else {
+        ctap_flash_write(page, data, len);
+    }
+
+    return ctap_flash_verify(page, offset, data, len);
 #else
     return 0;
 #endif
 }
 
 #ifndef CONFIG_CTAP_NATIVE
+static bool is_erased(int page, int offset, size_t len)
+{
+    uint32_t *addr = (uint32_t *)((uint8_t *)flashpage_addr(page) + offset);
+    for (size_t i = 0; i < len / 4; i++) {
+        if (addr[i] != 0xffffffff) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static void ctap_flash_write_raw(int page, int offset,
                                 const void *data, size_t len)
 {
-
     uint32_t *addr = (uint32_t *)((uint8_t *)flashpage_addr(page) + offset);
     flashpage_write_raw(addr, data, len);
 }
@@ -84,7 +97,6 @@ static int ctap_flash_verify(int page, int offset, const void *data, size_t len)
         return FLASHPAGE_OK;
     }
     else {
-        DEBUG("Flash does not match \n");
         return FLASHPAGE_NOMATCH;
     }
 }

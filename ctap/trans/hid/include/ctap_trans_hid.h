@@ -244,6 +244,9 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw);
  */
 void ctap_trans_hid_send_keepalive(uint8_t status);
 
+
+void ctap_trans_hid_check_timeouts(void);
+
 #ifdef __cplusplus
 }
 #endif

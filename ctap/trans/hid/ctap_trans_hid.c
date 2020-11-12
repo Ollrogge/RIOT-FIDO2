@@ -5,7 +5,6 @@
 #include "ctap.h"
 #include "cbor.h"
 
-#include "thread.h"
 #include "xtimer.h"
 
 #define ENABLE_DEBUG    (1)
@@ -37,19 +36,6 @@ static uint8_t is_init_type_pkt(ctap_hid_pkt_t* pkt);
 
 static ctap_hid_buffer_t ctap_buffer;
 
-static kernel_pid_t worker_pid;
-
-//todo: reduce buffer size !!
-static char worker_stack[16384];
-static void* pkt_worker(void* pkt_raw);
-
-#ifdef CONFIG_CTAP_NATIVE
-static char stack[16384];
-#else
-static char stack[2048];
-#endif
-static void* pkt_loop(void* arg);
-
 static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
 
 static void send_init_response(uint32_t, uint32_t, uint8_t*);
@@ -68,9 +54,9 @@ static uint8_t cid_exists(uint32_t cid);
 static uint32_t get_new_cid(void);
 static uint16_t get_packet_len(ctap_hid_pkt_t* pkt);
 
-static void reset_ctap_buffer(void);
+static void pkt_worker(void);
 
-static void check_timeouts(void);
+static void reset_ctap_buffer(void);
 
 static mutex_t is_busy_mutex;
 static bool is_busy = false;
@@ -95,7 +81,7 @@ static bool should_cancel(void)
     return ret;
 }
 
-static void check_timeouts(void)
+void ctap_trans_hid_check_timeouts(void)
 {
     uint64_t now = xtimer_now_usec64();
     for (uint8_t i = 0; i < CTAP_HID_CIDS_MAX; i++) {
@@ -194,17 +180,7 @@ static uint16_t get_packet_len(ctap_hid_pkt_t* pkt)
 void ctap_trans_hid_create(void)
 {
     ctap_trans_create(CTAP_TRANS_USB , report_desc_ctap, sizeof(report_desc_ctap));
-
     mutex_init(&is_busy_mutex);
-
-    DEBUG("Creating ctap_hid worker thread \n");
-    worker_pid = thread_create(worker_stack, sizeof(worker_stack),
-                THREAD_PRIORITY_MAIN -1, THREAD_CREATE_SLEEPING, pkt_worker,
-                NULL, "ctap_hid_pkt_worker");
-
-    DEBUG("Creating ctap_hid main thread \n");
-    thread_create(stack, sizeof(stack), THREAD_PRIORITY_MAIN, 0, pkt_loop,
-                                NULL, "ctap_hid_main");
 }
 
 static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
@@ -330,9 +306,8 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
     else if (status == CTAP_HID_BUFFER_STATUS_DONE) {
         /*todo: mutex needed here too? */
         ctap_buffer.is_locked = 1;
-        if (thread_wakeup(worker_pid) != 1) {
-            DEBUG("Thread weakup failed \n");
-        }
+        pkt_worker();
+        is_busy = false;
     }
     else {
         /* refresh timestamp of cid that is being buffered */
@@ -342,95 +317,60 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
     mutex_unlock(&is_busy_mutex);
 }
 
-static void* pkt_loop(void* arg)
+static void pkt_worker(void)
 {
-    (void) arg;
-    uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
-    int read;
+    uint8_t* buf = (uint8_t*) &ctap_buffer.buffer;
+    uint32_t cid = ctap_buffer.cid;
+    uint16_t bcnt = ctap_buffer.bcnt;
+    uint8_t cmd = ctap_buffer.cmd;
 
-    while (1) {
-        read = ctap_trans_read_timeout(CTAP_TRANS_USB , buffer,
-        CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
-
-        if (read == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
-            ctap_trans_hid_handle_packet(buffer);
-        }
-
-        check_timeouts();
+    if (cmd == CTAP_HID_COMMAND_INIT) {
+        cid = handle_init_packet(cid, bcnt, buf);
     }
-
-    return (void*)0;
-}
-
-static void* pkt_worker(void* arg)
-{
-    (void) arg;
-
-    ctap_init();
-
-    while (1) {
-
-        uint8_t* buf = (uint8_t*) &ctap_buffer.buffer;
-        uint32_t cid = ctap_buffer.cid;
-        uint16_t bcnt = ctap_buffer.bcnt;
-        uint8_t cmd = ctap_buffer.cmd;
-
-        if (cmd == CTAP_HID_COMMAND_INIT) {
-            cid = handle_init_packet(cid, bcnt, buf);
+    else {
+        /* broadcast cid only allowed for CTAP_HID_COMMAND_INIT */
+        if (cid == CTAP_HID_BROADCAST_CID || cid == 0) {
+            send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
+        }
+         /* readding deleted cid */
+         /* todo: would it be possible to steal a channel ? */
+        else if (!cid_exists(cid) && add_cid(cid) == -1) {
+            send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
         }
         else {
-            /* broadcast cid only allowed for CTAP_HID_COMMAND_INIT */
-            if (cid == CTAP_HID_BROADCAST_CID || cid == 0) {
-                send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
-            }
-             /* readding deleted cid */
-             /* todo: would it be possible to steal a channel ? */
-            else if (!cid_exists(cid) && add_cid(cid) == -1) {
-                send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
-            }
-            else {
-                switch(cmd) {
-                    case CTAP_HID_COMMAND_MSG:
-                        /* not implemented */
-                        DEBUG("CTAP_HID: MSG COMMAND \n");
-                        send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
-                        break;
-                    case CTAP_HID_COMMAND_CBOR:
-                        DEBUG("CTAP_HID: CBOR COMMAND \n");
-                        handle_cbor_packet(cid, bcnt, cmd, buf);
-                        break;
-                    case CTAP_HID_COMMAND_WINK:
-                        DEBUG("CTAP_HID: wink \n");
-                        wink(cid, cmd);
-                        break;
-                    case CTAP_HID_COMMAND_PING:
-                        DEBUG("CTAP_HID: PING \n");
-                        ctap_hid_write(cmd, cid, buf, bcnt);
-                        break;
-                    case CTAP_HID_COMMAND_CANCEL:
-                        /*
-                         * no transaction is currently being processed,
-                         * no reason to send cancel
-                         */
-                        break;
-                    default:
-                        send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
-                        DEBUG("Ctaphid: unknown command %u \n", cmd);
-                }
+            switch(cmd) {
+                case CTAP_HID_COMMAND_MSG:
+                    /* not implemented */
+                    DEBUG("CTAP_HID: MSG COMMAND \n");
+                    send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
+                    break;
+                case CTAP_HID_COMMAND_CBOR:
+                    DEBUG("CTAP_HID: CBOR COMMAND \n");
+                    handle_cbor_packet(cid, bcnt, cmd, buf);
+                    break;
+                case CTAP_HID_COMMAND_WINK:
+                    DEBUG("CTAP_HID: wink \n");
+                    wink(cid, cmd);
+                    break;
+                case CTAP_HID_COMMAND_PING:
+                    DEBUG("CTAP_HID: PING \n");
+                    ctap_hid_write(cmd, cid, buf, bcnt);
+                    break;
+                case CTAP_HID_COMMAND_CANCEL:
+                    /*
+                     * no transaction is currently being processed,
+                     * no reason to send cancel
+                     */
+                    break;
+                default:
+                    send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
+                    DEBUG("Ctaphid: unknown command %u \n", cmd);
             }
         }
-
-        /* transaction done, cleanup */
-        reset_ctap_buffer();
-
-        mutex_lock(&is_busy_mutex);
-        is_busy = false;
-        mutex_unlock(&is_busy_mutex);
-
-        thread_sleep();
     }
 
-    return (void*)0;
+    /* transaction done, cleanup */
+    reset_ctap_buffer();
 }
 
 static void wink(uint32_t cid, uint8_t cmd)
@@ -580,12 +520,9 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 
     memmove(buf, &cid, sizeof(cid));
     offset += sizeof(cid);
-    buf[offset] = cmd;
-    offset++;
-    buf[offset] = (size & 0xff00) >> 8;
-    offset++;
-    buf[offset] = (size & 0xff) >> 0;
-    offset++;
+    buf[offset++] = cmd;
+    buf[offset++] = (size & 0xff00) >> 8;
+    buf[offset++] = (size & 0xff) >> 0;
 
     if (_data == NULL) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);

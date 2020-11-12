@@ -5,9 +5,7 @@
 #include "mutex.h"
 #include "timex.h"
 
-#ifdef CONFIG_CTAP_USB
 #include "ctap_trans_hid.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
