@@ -8,6 +8,8 @@ from binascii import a2b_hex
 from hashlib import sha256
 import threading
 import time
+import sys
+from udp_binding import force_udp_backend
 
 import unittest
 
@@ -254,6 +256,7 @@ class TestCtap(unittest.TestCase):
     #@unittest.skip
     def test_make_credential_and_get_assertion(self):
         print()
+        force_udp_backend()
         print("*** test_make_credential_and_get_assertion ***")
         try:
             dev = get_device()
@@ -274,7 +277,7 @@ class TestCtap(unittest.TestCase):
         user2 = {"id": b"user_id2", "name": "A. User2"}
 
         # rk
-        credential1 = make_credential(server, client, user1, True)
+        credential1 = make_credential(server, client, user1, False)
         # no rk
         credential2 = make_credential(server, client, user2, False)
         authenticate(server, client, credential1)
@@ -340,4 +343,5 @@ class TestCtap(unittest.TestCase):
         print("Credential authenticated!")
 
 if __name__ == '__main__':
+
     unittest.main()

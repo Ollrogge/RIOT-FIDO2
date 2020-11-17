@@ -27,7 +27,7 @@ def get_device():
     assert len(devs) == 1
     return devs[0]
 
-def make_credential(server, client, user, rk= None):
+def make_credential(server, client, user, rk= False):
     start = time.time_ns()
     create_options, state = server.register_begin(user, resident_key= rk)
 
