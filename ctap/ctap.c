@@ -1117,7 +1117,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
 
             /* beginning of a new page, read from flash */
             if (page_offset_into_page == 0) {
-                ctap_flash_read(CTAP_RK_START_PAGE + page_offset, page);
+                ctap_mem_read(CTAP_RK_START_PAGE + page_offset, page);
             }
 
             memmove(&rk_temp, page + page_offset_into_page, sizeof(rk_temp));
@@ -1138,7 +1138,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     memmove(buf, rk, sizeof(*rk));
 
     if (!equal) {
-        if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset,
+        if (ctap_mem_write_and_verify(CTAP_RK_START_PAGE + page_offset,
             page_offset_into_page, buf, sizeof(buf)) != FLASHPAGE_OK)
         {
             DEBUG("ctap save rk: flash write failed \n");
@@ -1154,7 +1154,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     }
     else {
         memmove(page + page_offset_into_page, buf, sizeof(buf));
-        if (ctap_flash_write_and_verify(CTAP_RK_START_PAGE + page_offset, 0,
+        if (ctap_mem_write_and_verify(CTAP_RK_START_PAGE + page_offset, 0,
             page, sizeof(page)) != FLASHPAGE_OK)
         {
             DEBUG("ctap save rk: flash write failed \n");
@@ -1178,7 +1178,7 @@ static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
 
     memset(page, 0, sizeof(page));
 
-    ctap_flash_read(CTAP_RK_START_PAGE + page_offset, page);
+    ctap_mem_read(CTAP_RK_START_PAGE + page_offset, page);
 
     memmove(rk, page + page_offset_into_page, sizeof(*rk));
 
@@ -1193,7 +1193,7 @@ static int save_state(ctap_state_t * state)
 
     memmove(page, state, sizeof(*state));
 
-    return ctap_flash_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page,
+    return ctap_mem_write_and_verify(CTAP_RK_START_PAGE - 1, 0, page,
             sizeof(page));
 }
 
@@ -1207,7 +1207,7 @@ static void load_state(ctap_state_t *state)
 {
     uint8_t page[FLASHPAGE_SIZE];
 
-    ctap_flash_read(CTAP_RK_START_PAGE - 1, page);
+    ctap_mem_read(CTAP_RK_START_PAGE - 1, page);
 
     memmove(state, page, sizeof(*state));
 }

@@ -39,9 +39,9 @@
 extern "C" {
 #endif
 
-int ctap_flash_write_and_verify(int page, int offset, const void *data, size_t len);
+int ctap_mem_write_and_verify(int page, int offset, const void *data, size_t len);
 
-void ctap_flash_read(int page, void *data);
+void ctap_mem_read(int page, void *data);
 
 
 #ifdef __cplusplus

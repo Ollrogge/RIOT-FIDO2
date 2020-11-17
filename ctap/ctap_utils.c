@@ -1,4 +1,13 @@
+#ifdef CONFIG_CTAP_NATIVE
+#include <sys/time.h>
+#endif
+
+#include "xtimer.h"
+
 #include "ctap_utils.h"
+
+#define ENABLE_DEBUG    (1)
+#include "debug.h"
 
 void print_hex(uint8_t* data, size_t size)
 {
@@ -9,13 +18,27 @@ void print_hex(uint8_t* data, size_t size)
     DEBUG("\n");
 }
 
-uint32_t timestamp(void)
+uint64_t timestamp(void)
 {
-    static xtimer_ticks32_t t1 = {0};
-    xtimer_ticks32_t t2 = xtimer_now();
-    xtimer_ticks32_t delta = xtimer_diff(t2, t1);
+#ifndef CONFIG_CTAP_NATIVE
+    static xtimer_ticks64_t t1 = {0};
+    xtimer_ticks64_t t2 = xtimer_now64();
+    xtimer_ticks64_t delta = xtimer_diff64(t2, t1);
 
     t1 = t2;
 
-    return xtimer_usec_from_ticks(delta);
+    return xtimer_usec_from_ticks64(delta);
+#else
+    static struct timeval t1 = {0};
+    struct timeval t2;
+
+    gettimeofday(&t2, NULL);
+
+    uint64_t delta = (t2.tv_sec*(uint64_t)1000000 + t2.tv_usec) -
+                     (t1.tv_sec*(uint64_t)1000000 + t1.tv_usec);
+
+    t1 = t2;
+
+    return delta;
+#endif
 }
