@@ -5,6 +5,12 @@
 #include "ctap.h"
 #include "cbor.h"
 
+#ifdef CONFIG_CTAP_NATIVE
+#include <sys/time.h>
+#endif
+
+#include "ctap_utils.h"
+
 #include "xtimer.h"
 
 #define ENABLE_DEBUG    (1)
@@ -447,6 +453,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     ctap_resp_t resp;
     uint8_t err;
     size_t size;
+    uint8_t type = *payload;
 
     if (bcnt == 0) {
         err = CTAP_HID_ERROR_INVALID_LEN;
@@ -455,17 +462,24 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
         return;
     }
 
-    uint32_t start, end;
+memset(&resp, 0, sizeof(ctap_resp_t));
+#ifndef CONFIG_CTAP_NATIVE
 
-    uint8_t type = *payload;
-
-    memset(&resp, 0, sizeof(ctap_resp_t));
-    start = xtimer_now_usec();
+    timestamp();
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
-    end = xtimer_now_usec();
-    int delta = end - start;
 
-    DEBUG("OPERATION TOOK: %d usec type: %u \n", delta, type);
+    DEBUG("OPERATION TOOK: %u usec type: %u \n", timestamp(), type);
+#else
+    struct timeval te;
+    gettimeofday(&te, NULL);
+    uint64_t start = te.tv_sec*(uint64_t)1000000 + te.tv_usec;
+    size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
+    gettimeofday(&te, NULL);
+    uint64_t end = te.tv_sec*(uint64_t)1000000 + te.tv_usec;
+    uint64_t delta = end - start;
+
+    DEBUG("OPERATION TOOK: %llu usec type: %u \n", delta, type);
+#endif
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */

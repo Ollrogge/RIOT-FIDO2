@@ -32,7 +32,7 @@ static void* pkt_loop(void* arg)
     uint8_t buffer[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
     int read;
     while (1) {
-        read = ctap_trans_read_timeout(CTAP_TRANS_USB , buffer,
+        read = ctap_trans_read_timeout_usb(buffer,
         CONFIG_USBUS_HID_INTERRUPT_EP_SIZE, CTAP_HID_TRANSACTION_TIMEOUT);
 
         if (read == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {

@@ -15,7 +15,9 @@
 #include "periph/gpio.h"
 #endif
 
-#define ENABLE_DEBUG    (0)
+#include "ctap_utils.h"
+
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 static uint8_t get_info(CborEncoder *encoder);
@@ -269,18 +271,6 @@ static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len)
     return CTAP2_OK;
 }
 
-/* http://cbor.me/ */
-/*
-static void print_hex(uint8_t* data, size_t size)
-{
-    for (size_t i = 0; i < size; i++) {
-        DEBUG("%02x", data[i]);
-    }
-
-    DEBUG("\n");
-}
-*/
-
 size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
                            bool (*should_cancel)(void))
 {
@@ -434,7 +424,6 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
-    /* todo: add macro to disable user presence test */
 #ifdef CONFIG_CTAP_BENCHMARKS
     up = true;
 #else
@@ -655,6 +644,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         return CTAP2_ERR_KEEPALIVE_CANCEL;
     }
 
+    /* use global sign counter */
     if (rk->cred_desc.has_nonce) {
         ret = make_auth_data_assert(req.rp_id, req.rp_id_len, &auth_data, uv, up,
                                     g_state.sign_count);

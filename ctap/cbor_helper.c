@@ -1,4 +1,6 @@
 
+#include "xtimer.h"
+
 #include "cbor_helper.h"
 
 #define ENABLE_DEBUG    (1)
@@ -260,7 +262,6 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     ret = cbor_encode_byte_string(&map, auth_data_buf, offset);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    /* get signature for attesttation statement */
     ret = ctap_get_attest_sig(auth_data_buf, offset, client_data_hash, rk,
                             sig_buf, &sig_buf_len);
 
@@ -451,18 +452,6 @@ static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t* key)
 
     return CTAP2_OK;
 }
-
-/* http://cbor.me/ */
-/*
-static void print_hex(uint8_t* req, size_t size)
-{
-    for (size_t i = 0; i < size; i++) {
-        DEBUG("%02x", req[i]);
-    }
-
-    DEBUG("\n");
-}
-*/
 
 uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size, uint8_t *req_raw)
 {
