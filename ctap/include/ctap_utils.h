@@ -10,7 +10,7 @@ extern "C" {
 
 void print_hex(uint8_t* data, size_t size);
 
-uint64_t timestamp(void);
+int timestamp(void);
 
 #ifdef __cplusplus
 }

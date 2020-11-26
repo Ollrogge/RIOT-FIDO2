@@ -1,9 +1,10 @@
-
 #include "xtimer.h"
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 #include "ctap_mem.h"
+
+#include "ctap_utils.h"
 
 #ifndef CONFIG_CTAP_NATIVE
 static void flash_write_raw(int page, int offset,
@@ -21,7 +22,7 @@ void ctap_mem_read(int page, void *data)
 #ifdef CONFIG_CTAP_NATIVE
     return;
 #else
-    return flashpage_read(page, data);
+    flashpage_read(page, data);
 #endif
 }
 
@@ -42,6 +43,8 @@ int ctap_mem_write_and_verify(int page, int offset,
 #ifndef CONFIG_CTAP_NATIVE
     assert(!(len % FLASHPAGE_RAW_BLOCKSIZE));
 
+    timestamp();
+
     if (is_erased(page, offset, len)) {
         flash_write_raw(page, offset, data, len);
     }
@@ -49,7 +52,9 @@ int ctap_mem_write_and_verify(int page, int offset,
         flash_write(page, data, len);
     }
 
-    return flash_verify(page, offset, data, len);
+    int ret = flash_verify(page, offset, data, len);
+    DEBUG("Flash took: %d \n", timestamp());
+    return ret;
 #else
     return 0;
 #endif

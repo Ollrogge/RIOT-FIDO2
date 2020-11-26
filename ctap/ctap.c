@@ -17,7 +17,7 @@
 
 #include "ctap_utils.h"
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 #include "debug.h"
 
 static uint8_t get_info(CborEncoder *encoder);
@@ -46,7 +46,6 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
                              bool (*should_cancel)(void));
 static uint8_t key_agreement(CborEncoder *encoder);
 static uint8_t save_rk(ctap_resident_key_t *rk);
-static uint8_t load_rk(uint16_t index, ctap_resident_key_t *k);
 static bool ks_are_equal(ctap_resident_key_t *k1, ctap_resident_key_t *k2);
 static int cred_cmp(const void *a, const void *b);
 static uint8_t save_pin(uint8_t *pin, size_t len);
@@ -463,11 +462,21 @@ static bool rks_exist(ctap_cred_desc_alt_t *li, size_t len, uint8_t *rp_id,
 {
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
     sha256(rp_id, rp_id_len, rp_id_hash);
+    uint8_t page[FLASHPAGE_SIZE];
+    uint16_t page_offset = 0, page_offset_into_page = 0;
     ctap_resident_key_t rk;
 
     for (uint16_t i = 0; i < g_state.rk_amount_stored; i++) {
-        memset(&rk, 0, sizeof(rk));
-        load_rk(i, &rk);
+        page_offset = i / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
+        page_offset_into_page = CTAP_PAD_RK_SZ * (i % \
+                                (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ));
+
+        if (page_offset_into_page == 0) {
+            ctap_mem_read(CTAP_RK_START_PAGE + page_offset, page);
+        }
+
+        memmove(&rk, page + page_offset_into_page, sizeof(rk));
+
         if (memcmp(rk.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
             for (size_t j = 0; j < len; j++) {
                 if (memcmp(li[j].cred_id.id, rk.cred_desc.cred_id,
@@ -487,8 +496,10 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
 {
     uint8_t index = 0;
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
+    uint8_t page[FLASHPAGE_SIZE];
     ctap_resident_key_t rk;
     ctap_cred_desc_alt_t *cred_desc;
+    uint16_t page_offset = 0, page_offset_into_page = 0;
     int ret;
 
     sha256(rp_id, rp_id_len, rp_id_hash);
@@ -511,8 +522,16 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
         if (index >= rks_len) {
             break;
         }
-        memset(&rk, 0, sizeof(rk));
-        load_rk(i, &rk);
+        page_offset = i / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
+        page_offset_into_page = CTAP_PAD_RK_SZ * (i % \
+                                (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ));
+
+
+        if (page_offset_into_page == 0) {
+            ctap_mem_read(CTAP_RK_START_PAGE + page_offset, page);
+        }
+
+        memmove(&rk, page + page_offset_into_page, sizeof(rk));
 
         /* search for rk's matching rp_id_hash */
         if (memcmp(rk.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH) == 0) {
@@ -526,14 +545,16 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
                             index++;
                             break;
                     }
-                }
-
-                /* no match with stored keys, try to decrypt */
-                ret = ctap_decrypt_rk(&rks[index], &cred_desc->cred_id);
-                if (ret == CTAP2_OK) {
-                    if (memcmp(rks[index].rp_id_hash, rk.rp_id_hash,
-                        SHA256_DIGEST_LENGTH) == 0) {
-                        index++;
+                    else {
+                        /* no match with stored keys, try to decrypt */
+                        ret = ctap_decrypt_rk(&rks[index], &cred_desc->cred_id);
+                        if (ret == CTAP2_OK) {
+                            if (memcmp(rks[index].rp_id_hash, rk.rp_id_hash,
+                                SHA256_DIGEST_LENGTH) == 0) {
+                                    index++;
+                                    break;
+                            }
+                        }
                     }
                 }
             }
@@ -1161,26 +1182,6 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
             return CTAP1_ERR_OTHER;
         }
     }
-
-    return CTAP2_OK;
-}
-
-static uint8_t load_rk(uint16_t index, ctap_resident_key_t *rk)
-{
-    uint16_t page_offset = index / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
-    uint16_t page_offset_into_page = CTAP_PAD_RK_SZ * (index % \
-                                (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ));
-    uint8_t page[FLASHPAGE_SIZE];
-
-    if (g_state.rk_amount_stored >= CTAP_MAX_RK) {
-        return CTAP2_ERR_KEY_STORE_FULL;
-    }
-
-    memset(page, 0, sizeof(page));
-
-    ctap_mem_read(CTAP_RK_START_PAGE + page_offset, page);
-
-    memmove(rk, page + page_offset_into_page, sizeof(*rk));
 
     return CTAP2_OK;
 }

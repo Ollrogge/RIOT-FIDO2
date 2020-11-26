@@ -3,7 +3,7 @@
 
 #include "cbor_helper.h"
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 #include "debug.h"
 
 static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp);

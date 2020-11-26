@@ -1,8 +1,10 @@
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 #include "crypto/ciphers.h"
 #include "crypto/modes/ccm.h"
+
+#include "ctap_utils.h"
 
 #include "relic.h"
 
@@ -48,8 +50,10 @@ uint8_t ctap_crypto_init(void)
 
 void ctap_crypto_prng(uint8_t *dst, size_t len)
 {
+    timestamp();
     /* relic random bytes func */
     rand_bytes(dst, len);
+    DEBUG("Crypto took: %d \n", timestamp());
 }
 
 int ctap_crypto_reset_key_agreement(void)
@@ -185,6 +189,7 @@ uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t * in,
                                 uint8_t mac_len, uint8_t l, uint8_t *nonce,
                                 uint8_t *key)
 {
+    timestamp();
     cipher_t cipher;
     int ret, len;
 
@@ -202,6 +207,8 @@ uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t * in,
         return CTAP1_ERR_OTHER;
     }
 
+    DEBUG("Crypto took: %d \n", timestamp());
+
     return CTAP2_OK;
 }
 
@@ -210,6 +217,7 @@ uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, uint8_t *in,
                                 uint8_t mac_len, uint8_t l, uint8_t *nonce,
                                 uint8_t *key)
 {
+    timestamp();
     cipher_t cipher;
     int ret, len;
 
@@ -226,11 +234,14 @@ uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, uint8_t *in,
         return CTAP1_ERR_OTHER;
     }
 
+    DEBUG("Crypto took: %d \n", timestamp());
+
     return CTAP2_OK;
 }
 
 uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 {
+    timestamp();
     ec_t pub;
     bn_t priv;
     int ret;
@@ -255,12 +266,14 @@ uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
     ec_free(pub);
     bn_free(priv);
 
+    DEBUG("Crypto took: %d \n", timestamp());
     return CTAP2_OK;
 }
 
 uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
                             size_t *sig_len, uint8_t *key, size_t key_len)
 {
+    timestamp();
     bn_t priv, r, s;
     int ret;
 
@@ -287,6 +300,7 @@ cleanup:
     bn_free(r);
     bn_free(s);
 
+    DEBUG("Crypto took: %d \n", timestamp());
     return ret != CTAP2_OK ? CTAP1_ERR_OTHER : CTAP2_OK;
 }
 

@@ -464,10 +464,22 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
 
     memset(&resp, 0, sizeof(ctap_resp_t));
 
-    timestamp();
+#ifndef CONFIG_CTAP_NATIVE
+    xtimer_ticks64_t start = xtimer_now64();
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
+    xtimer_ticks64_t end = xtimer_now64();
+    xtimer_ticks64_t delta = xtimer_diff64(end, start);
+    DEBUG("OPERATION TOOK: %lu usec type: %u \n",(uint32_t)xtimer_usec_from_ticks64(delta), type);
+#else
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+    size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
+    gettimeofday(&end, NULL);
+    uint64_t delta = (end.tv_sec*(uint64_t)1000000 + end.tv_usec) -
+                     (start.tv_sec*(uint64_t)1000000 + start.tv_usec);
 
-    DEBUG("OPERATION TOOK: %llu usec type: %u \n", timestamp(), type);
+    DEBUG("OPERATION TOOK: %llu usec type: %u \n", delta, type);
+#endif
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */
@@ -562,6 +574,6 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
 
     if (offset > 0) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
-         ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
+        ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
     }
 }

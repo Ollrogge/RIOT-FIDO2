@@ -18,7 +18,7 @@ void print_hex(uint8_t* data, size_t size)
     DEBUG("\n");
 }
 
-uint64_t timestamp(void)
+int timestamp(void)
 {
 #ifndef CONFIG_CTAP_NATIVE
     static xtimer_ticks64_t t1 = {0};
@@ -27,7 +27,7 @@ uint64_t timestamp(void)
 
     t1 = t2;
 
-    return xtimer_usec_from_ticks64(delta);
+    return (uint32_t)xtimer_usec_from_ticks64(delta);
 #else
     static struct timeval t1 = {0};
     struct timeval t2;
@@ -39,6 +39,6 @@ uint64_t timestamp(void)
 
     t1 = t2;
 
-    return delta;
+    return (uint32_t)delta;
 #endif
 }
