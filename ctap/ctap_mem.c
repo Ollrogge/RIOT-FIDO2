@@ -40,7 +40,7 @@ int ctap_mem_write_and_verify(int page, int offset,
     (void)len;
 
 #ifndef CONFIG_CTAP_NATIVE
-    assert(!(len % FLASHPAGE_RAW_BLOCKSIZE));
+    assert(!(len % FLASHPAGE_WRITE_BLOCK_SIZE));
 
     if (is_erased(page, offset, len)) {
         flash_write_raw(page, offset, data, len);
@@ -72,7 +72,7 @@ static void flash_write_raw(int page, int offset,
                                 const void *data, size_t len)
 {
     uint32_t *addr = (uint32_t *)((uint8_t *)flashpage_addr(page) + offset);
-    flashpage_write_raw(addr, data, len);
+    flashpage_write(addr, data, len);
 }
 
 static int flash_verify(int page, int offset, const void *data, size_t len)
@@ -101,7 +101,7 @@ static void flash_write(int page, const void *data, size_t len)
 
     /* write data to page */
     if (data != NULL) {
-        flashpage_write_raw(page_addr, data, len);
+        flashpage_write(page_addr, data, len);
     }
 }
 #endif

@@ -2,6 +2,7 @@
 ifneq (native, $(BOARD))
     FEATURES_REQUIRED += periph_flashpage
     FEATURES_REQUIRED += periph_gpio_irq
+    USEMODULE += periph_flashpage_pagewise
 endif
 
 USEMODULE += ctap_trans
