@@ -61,7 +61,7 @@ extern "C" {
 /** @} */
 
 /* todo: both timeouts are arbitrary */
-#define CTAP_HID_TRANSACTION_TIMEOUT    (1 * US_PER_SEC) /**< cont packet not sent in time */
+#define CTAP_HID_TRANSACTION_TIMEOUT    (0.75 * US_PER_SEC) /**< cont packet not sent in time */
 
 /**
  * @brief CTAP_HID max message payload size
