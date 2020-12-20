@@ -604,9 +604,9 @@ struct __attribute__((packed)) ctap_resident_key
  */
 typedef struct __attribute__((packed))
 {
-    uint8_t id[CTAP_CREDENTIAL_ID_ENC_SIZE];
-    uint8_t mac[CTAP_AES_CCM_MAC_SIZE];
-    uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];
+    uint8_t id[CTAP_CREDENTIAL_ID_ENC_SIZE];    /**< id */
+    uint8_t mac[CTAP_AES_CCM_MAC_SIZE];         /**< AES CCM MAC */
+    uint8_t nonce[CTAP_AES_CCM_NONCE_SIZE];     /**< AES CCM nonce */
 } ctap_cred_id_t;
 
 /**

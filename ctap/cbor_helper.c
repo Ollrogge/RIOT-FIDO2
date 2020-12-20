@@ -144,8 +144,18 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     uint8_t sig_buf[CTAP_ES256_DER_MAX_SIZE];
     size_t sig_buf_len = sizeof(sig_buf);
     ctap_cred_id_t id;
+    ctap_cred_desc_t *cred_desc = &rk->cred_desc;
+    bool is_resident = !cred_desc->has_nonce;
 
-    uint8_t map_len = valid_cred_count > 1 ? 5 : 4;
+    uint8_t map_len = 3;
+
+    if (valid_cred_count > 1) {
+        map_len++;
+    }
+
+    if (is_resident) {
+        map_len++;
+    }
 
     ret = cbor_encoder_create_map(encoder, &map, map_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
@@ -153,9 +163,7 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     ret = cbor_encode_int(&map, CTAP_GA_RESP_CREDENTIAL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    ctap_cred_desc_t *cred_desc = &rk->cred_desc;
-
-    if (cred_desc->has_nonce) {
+    if (!is_resident) {
         ret = ctap_encrypt_rk(rk, rk->cred_desc.nonce, &id);
 
         if (ret != CTAP2_OK) {
@@ -190,11 +198,14 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     ret = cbor_encode_byte_string(&map, sig_buf, sig_buf_len);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    ret = cbor_encode_int(&map, CTAP_GA_RESP_USER);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
-    ret = encode_user_entity(&map, rk);
-    if (ret != CTAP2_OK) {
-        return ret;
+    /* user_id mandatory if resident credential */
+    if (is_resident) {
+        ret = cbor_encode_int(&map, CTAP_GA_RESP_USER);
+        if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+        ret = encode_user_entity(&map, rk);
+        if (ret != CTAP2_OK) {
+            return ret;
+        }
     }
 
     if (valid_cred_count > 1) {
@@ -393,7 +404,6 @@ uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_
     return CTAP2_OK;
 }
 
-// todo pass user entity struct once unnecessary field are removed
 static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
 {
     int ret;
@@ -695,6 +705,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
                 break;
             case CTAP_MC_REQ_EXTENSIONS:
                 DEBUG("CTAP_make_credential parse exclude_list \n");
+                ret = CTAP2_ERR_UNSUPPORTED_EXTENSION;
                 break;
             case CTAP_MC_REQ_OPTIONS:
                 DEBUG("CTAP_make_credential parse options \n");
@@ -1152,7 +1163,9 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_alt_t *cred)
     buf_len = sizeof(type_str);
 
     ret = cbor_value_copy_text_string(&val, type_str, &buf_len, NULL);
-    if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
+
+    /* CborErrorOutOfMemory == unknown type */
+    if (ret != CborNoError && ret != CborErrorOutOfMemory) return CTAP2_ERR_CBOR_PARSING;
     type_str[sizeof(type_str) - 1] = 0;
 
     if (strncmp(type_str, "public-key", 11) == 0) {
@@ -1172,7 +1185,7 @@ uint8_t parse_cred_desc(CborValue *arr, ctap_cred_desc_alt_t *cred)
     ret = cbor_value_copy_byte_string(&val, (uint8_t *)&cred->cred_id, &buf_len, NULL);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;
 
-    if (buf_len < CTAP_CREDENTIAL_ID_SIZE) return CTAP2_ERR_MISSING_PARAMETER;
+    if (buf_len < CTAP_CREDENTIAL_ID_SIZE) return CTAP1_ERR_INVALID_LENGTH;
 
     ret = cbor_value_advance(arr);
     if (ret != CborNoError) return CTAP2_ERR_CBOR_PARSING;

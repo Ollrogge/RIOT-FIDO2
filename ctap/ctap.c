@@ -378,6 +378,10 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
         return ret;
     }
 
+    if (req.options.up) {
+        return CTAP2_ERR_INVALID_OPTION;
+    }
+
     if (req.exclude_list_len > 0) {
 
         if (req.exclude_list_len > CTAP_MAX_EXCLUDE_LIST_SIZE) {
@@ -461,10 +465,25 @@ static bool rks_exist(ctap_cred_desc_alt_t *li, size_t len, uint8_t *rp_id,
                         size_t rp_id_len)
 {
     uint8_t rp_id_hash[SHA256_DIGEST_LENGTH];
-    sha256(rp_id, rp_id_len, rp_id_hash);
     uint8_t page[FLASHPAGE_SIZE];
     uint16_t page_offset = 0, page_offset_into_page = 0;
     ctap_resident_key_t rk;
+    int ret;
+
+    sha256(rp_id, rp_id_len, rp_id_hash);
+
+    /* check if cred is bound to authenticator by decrypting it */
+    if (g_state.rk_amount_stored == 0) {
+        for (uint16_t i = 0; i < len; i++) {
+            ret = ctap_decrypt_rk(&rk, &li[i].cred_id);
+            if (ret == CTAP2_OK) {
+                if (memcmp(rk.rp_id_hash, rp_id_hash, SHA256_DIGEST_LENGTH)
+                    == 0) {
+                        return true;
+                }
+            }
+        }
+    }
 
     for (uint16_t i = 0; i < g_state.rk_amount_stored; i++) {
         page_offset = i / (FLASHPAGE_SIZE / CTAP_PAD_RK_SZ);
@@ -482,6 +501,16 @@ static bool rks_exist(ctap_cred_desc_alt_t *li, size_t len, uint8_t *rp_id,
                 if (memcmp(li[j].cred_id.id, rk.cred_desc.cred_id,
                     CTAP_CREDENTIAL_ID_SIZE) == 0) {
                         return true;
+                }
+                else {
+                    /* no match with stored key, try to decrypt */
+                    ret = ctap_decrypt_rk(&rk, &li[i].cred_id);
+                    if (ret == CTAP2_OK) {
+                        if (memcmp(rk.rp_id_hash, rp_id_hash,
+                            SHA256_DIGEST_LENGTH) == 0) {
+                                 return true;
+                        }
+                    }
                 }
             }
         }
@@ -546,7 +575,7 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
                             break;
                     }
                     else {
-                        /* no match with stored keys, try to decrypt */
+                        /* no match with stored key, try to decrypt */
                         ret = ctap_decrypt_rk(&rks[index], &cred_desc->cred_id);
                         if (ret == CTAP2_OK) {
                             if (memcmp(rks[index].rp_id_hash, rk.rp_id_hash,
@@ -614,13 +643,16 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         }
     }
 
-    g_assert_state.count = find_matching_rks(
-                            g_assert_state.rks,
+    g_assert_state.count = find_matching_rks(g_assert_state.rks,
                             sizeof(g_assert_state.rks), allow_list,
                             req.allow_list_len, req.rp_id, req.rp_id_len);
 
     if (pin_is_set() && !req.pin_auth_present) {
         uv = false;
+    }
+
+    if (req.pin_auth_present && req.pin_protocol != 1) {
+        return CTAP2_ERR_PIN_AUTH_INVALID;
     }
 
     if (pin_is_set() && req.pin_auth_present) {
@@ -636,10 +668,12 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     }
 
 #ifdef CONFIG_CTAP_BENCHMARKS
-    up = true;
-    g_assert_state.up = true;
+    if (req.options.up) {
+        up = true;
+        g_assert_state.up = true;
+    }
 #else
-    if (user_presence_test() == CTAP2_OK) {
+    if (req.options.up && user_presence_test() == CTAP2_OK) {
         up = true;
         g_assert_state.up = true;
     }
