@@ -25,7 +25,7 @@ INCLUDES += -I$(CURDIR)/ctap/include
 
 USB_VID = 1915
 USB_PID = 521f
-PRODUCT_STRING = Nils usb
+PRODUCT_STRING = FIDO2 usb
 
 QUIET ?= 1
 
@@ -36,6 +36,8 @@ CFLAGS += -DCONFIG_USB_PRODUCT_STR='"$(PRODUCT_STRING)"'
 CFLAGS += -DCONFIG_CTAP_OPTIONS_RK=1
 
 CFLAGS += -DCONFIG_CTAP_TESTING=1
+
+# Disable user presence tests for benchmarking purposes
 CFLAGS += -DCONFIG_CTAP_BENCHMARKS=1
 
 #todo: where to put presets ?
