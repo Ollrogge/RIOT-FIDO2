@@ -60,10 +60,14 @@ static void reset(void);
 static uint8_t verify_pin_auth(uint8_t *auth, uint8_t *hash, size_t len);
 static bool locked(void);
 static bool boot_locked(void);
+
+#ifndef CONFIG_CTAP_BENCHMARKS
 static uint8_t user_presence_test(void);
 #ifndef CONFIG_CTAP_NATIVE
 static void gpio_cb(void *arg);
 #endif
+#endif
+
 static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
                                 ctap_cred_desc_alt_t *allow_list,size_t allow_list_len,
                                 uint8_t* rp_id, size_t rp_id_len);
@@ -93,30 +97,12 @@ void ctap_init(void)
     /* todo: what to do if init fails? */
     ret = ctap_crypto_init();
 
+    /* first startup up of the device */
     if (g_state.initialized != CTAP_INITIALIZED_MARKER) {
-        g_state.initialized = CTAP_INITIALIZED_MARKER;
-        g_state.rem_pin_att = CTAP_PIN_MAX_ATTS;
-        g_state.pin_is_set = false;
-
-        ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
-        ctap_crypto_prng(g_state.cred_key, sizeof(g_state.cred_key));
-
-        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_PLAT;
-        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_RK;
-        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
-        g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_UP;
-
-        uint8_t aaguid[] = {CTAP_AAGUID};
-
-        static_assert(sizeof(aaguid) == CTAP_AAGUID_SIZE, "AAGUID has to be \
-                      128 bits long");
-
-        memmove(g_state.config.aaguid, aaguid, sizeof(g_state.config.aaguid));
-
-        save_state(&g_state);
+        reset();
     }
 
-     /* initialize pin_token */
+    /* initialize pin_token */
     ctap_crypto_prng(g_pin_token, sizeof(g_pin_token));
 }
 
@@ -126,12 +112,26 @@ static void reset(void)
     g_state.rem_pin_att = CTAP_PIN_MAX_ATTS;
     g_state.rem_pin_att_boot = CTAP_PIN_MAX_ATTS_BOOT;
     g_state.pin_is_set = false;
-    ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
     g_state.rk_amount_stored = 0;
     g_state.sign_count = 0;
+
+    ctap_crypto_prng(g_state.pin_salt, sizeof(g_state.pin_salt));
     ctap_crypto_prng(g_state.cred_key, sizeof(g_state.cred_key));
+
+    g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_PLAT;
+    g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_RK;
+    g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
+    g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_UP;
+
+    uint8_t aaguid[] = {CTAP_AAGUID};
+    static_assert(sizeof(aaguid) == CTAP_AAGUID_SIZE, "AAGUID has to be \
+                  128 bits long");
+    memmove(g_state.config.aaguid, aaguid, sizeof(g_state.config.aaguid));
+
     save_state(&g_state);
 }
+
+#ifndef CONFIG_CTAP_BENCHMARKS
 
 #ifndef CONFIG_CTAP_NATIVE
 static void gpio_cb(void *arg)
@@ -198,6 +198,7 @@ static uint8_t user_presence_test(void)
     return CTAP1_ERR_OTHER;
 #endif
 }
+#endif
 
 bool ctap_cred_params_supported(uint8_t cred_type, int32_t alg_type)
 {
@@ -248,6 +249,7 @@ static uint8_t decrement_pin_attempts(void)
 
 static uint8_t get_remaining_pin_attempts(void)
 {
+    DEBUG("Rem PIN attempts: %u \n", g_state.rem_pin_att);
     return g_state.rem_pin_att;
 }
 
@@ -398,7 +400,9 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
         if (rks_exist(exclude_list, req.exclude_list_len, req.rp.id,
             req.rp.id_len)) {
+#ifndef CONFIG_CTAP_BENCHMARKS
             user_presence_test();
+#endif
             return CTAP2_ERR_CREDENTIAL_EXCLUDED;
         }
     }
@@ -596,7 +600,7 @@ static uint8_t find_matching_rks(ctap_resident_key_t* rks, size_t rks_len,
     }
 
     /* sort ascending order based on sign count */
-    if (g_state.rk_amount_stored > 0) {
+    if (g_state.rk_amount_stored > 0 && index > 0) {
         qsort(rks, index, sizeof(ctap_resident_key_t), cred_cmp);
     }
 
@@ -651,7 +655,7 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         uv = false;
     }
 
-    if (req.pin_auth_present && req.pin_protocol != 1) {
+    if (req.pin_auth_present && req.pin_protocol != CTAP_PIN_PROT_VER) {
         return CTAP2_ERR_PIN_AUTH_INVALID;
     }
 
@@ -821,17 +825,18 @@ static uint8_t client_pin(CborEncoder *encoder, size_t size, uint8_t *req_raw,
     int ret;
     ctap_client_pin_req_t req;
 
-    if (locked()) {
-        return CTAP2_ERR_PIN_BLOCKED;
-    }
-
-    if (boot_locked()) {
-        return CTAP2_ERR_PIN_AUTH_BLOCKED;
-    }
-
     memset(&req, 0, sizeof(req));
-
     ret = cbor_helper_parse_client_pin_req(&req, size, req_raw);
+
+    if (req.sub_command != CTAP_CP_REQ_SUB_COMMAND_GET_RETRIES) {
+        if (locked()) {
+        return CTAP2_ERR_PIN_BLOCKED;
+        }
+
+        if (boot_locked()) {
+            return CTAP2_ERR_PIN_AUTH_BLOCKED;
+        }
+    }
 
     if (ret != CTAP2_OK) {
         DEBUG("Error parsing client_pin request: %d \n", ret);
@@ -876,6 +881,7 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
     hmac_context_t ctx2;
     int ret, len;
     uint8_t shared_key[CTAP_KEY_LEN];
+    uint8_t shared_secret[CTAP_CRYPTO_P256_P_SIZE];
     uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
     uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
     uint8_t hmac[SHA256_DIGEST_LENGTH];
@@ -898,7 +904,14 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
         return CTAP1_ERR_OTHER;
     }
 
-    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
+    ret = ctap_crypto_ecdh(shared_secret, sizeof(shared_secret),
+                            &req->key_agreement);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    sha256(shared_secret, sizeof(shared_secret), shared_key);
 
     hmac_sha256_init(&ctx2, shared_key, sizeof(shared_key));
     hmac_sha256_update(&ctx2, req->new_pin_enc, req->new_pin_enc_size);
@@ -932,9 +945,10 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
     if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
         DEBUG("get_pin_token: invalid pin \n");
         ctap_crypto_reset_key_agreement();
-        save_state(&g_state);
 
         ret = decrement_pin_attempts();
+
+        save_state(&g_state);
 
         if (ret != CTAP2_OK) {
             return ret;
@@ -968,7 +982,8 @@ static uint8_t change_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void
 
 static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
 {
-    uint8_t shared_key[CTAP_KEY_LEN];
+    uint8_t shared_key[SHA256_DIGEST_LENGTH];
+    uint8_t shared_secret[CTAP_CRYPTO_P256_P_SIZE];
     uint8_t hmac[SHA256_DIGEST_LENGTH];
     uint8_t new_pin_dec[CTAP_PIN_MAX_SIZE];
     int new_pin_dec_len = sizeof(new_pin_dec);
@@ -987,7 +1002,14 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
             return CTAP2_ERR_NOT_ALLOWED;
     }
 
-    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
+    ret = ctap_crypto_ecdh(shared_secret, sizeof(shared_secret),
+                            &req->key_agreement);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    sha256(shared_secret, sizeof(shared_secret), shared_key);
 
     hmac_sha256(shared_key, sizeof(shared_key), req->new_pin_enc,
                 req->new_pin_enc_size, hmac);
@@ -1023,11 +1045,13 @@ static uint8_t set_pin(ctap_client_pin_req_t *req, bool (*should_cancel)(void))
     return CTAP2_OK;
 }
 
+/* CTAP specification (version 20190130) section 5.5.7 */
 static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
                              bool (*should_cancel)(void))
 {
     sha256_context_t ctx;
-    uint8_t shared_key[CTAP_KEY_LEN];
+    uint8_t shared_key[SHA256_DIGEST_LENGTH];
+    uint8_t shared_secret[CTAP_CRYPTO_P256_P_SIZE];
     uint8_t pin_hash_dec[CTAP_PIN_TOKEN_SIZE];
     uint8_t pin_hash_dec_final[SHA256_DIGEST_LENGTH];
     uint8_t pin_token_enc[CTAP_PIN_TOKEN_SIZE];
@@ -1045,9 +1069,19 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
         return CTAP2_ERR_PIN_BLOCKED;
     }
 
-    ctap_crypto_derive_key(shared_key, sizeof(shared_key), &req->key_agreement);
+    /* returns abG.x */
+    ret = ctap_crypto_ecdh(shared_secret, sizeof(shared_secret),
+                          &req->key_agreement);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    /* sha256 of shared secret ((abG).x) to obtain shared key */
+    sha256(shared_secret, sizeof(shared_secret), shared_key);
 
     len = sizeof(pin_hash_dec);
+    /* todo: this function produces wrong results sometimes. I have no idea why */
     ret = ctap_crypto_aes_dec(pin_hash_dec, &len, req->pin_hash_enc,
             sizeof(req->pin_hash_enc), shared_key, sizeof(shared_key));
 
@@ -1069,9 +1103,10 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
     if (memcmp(pin_hash_dec_final, g_state.pin_hash, 16) != 0) {
         DEBUG("get_pin_token: invalid pin \n");
         ctap_crypto_reset_key_agreement();
-        save_state(&g_state);
 
         ret = decrement_pin_attempts();
+
+        save_state(&g_state);
 
         if (ret != CTAP2_OK) {
             return ret;
@@ -1117,6 +1152,8 @@ static uint8_t save_pin(uint8_t *pin, size_t len)
 static uint8_t key_agreement(CborEncoder *encoder)
 {
     ctap_cose_key_t key;
+
+    memset(&key, 0, sizeof(key));
 
     ctap_crypto_get_key_agreement(&key);
 

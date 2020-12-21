@@ -4,25 +4,20 @@
 #include "crypto/ciphers.h"
 #include "crypto/modes/ccm.h"
 
-#include "relic.h"
-
-#include "rijndael-api-fst.h"
-
 #include "ctap_crypto.h"
 
-typedef struct
-{
-    ec_t pub;
-    bn_t priv;
-} ctap_key_agreement_key_t;
+#include "assert.h"
 
-static ctap_key_agreement_key_t g_ag_key;
+static ctap_crypto_key_agreement_key_t g_ag_key;
 
 static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len);
 
+static uint8_t init_key_agreement_key(ctap_crypto_key_agreement_key_t* key);
+
+static int ecdh(uint8_t *key, int key_len, bn_t d, ec_t q);
+
 uint8_t ctap_crypto_init(void)
 {
-    int ret;
     core_init();
     rand_init();
     ep_param_set(NIST_P256);
@@ -31,17 +26,34 @@ uint8_t ctap_crypto_init(void)
      * configuration operations upon power up
      * CTAP specification (version 20190130) section 5.5.2
      */
-    bn_null(g_ag_key.priv);
-    ec_null(g_ag_key.pub);
+    return init_key_agreement_key(&g_ag_key);
+}
 
-    bn_new(g_ag_key.priv);
-    ec_new(g_ag_key.pub);
+static uint8_t init_key_agreement_key(ctap_crypto_key_agreement_key_t* key)
+{
+    ec_t pub;
+    bn_t priv;
+    int ret;
 
-    ret = cp_ecdh_gen(g_ag_key.priv, g_ag_key.pub);
+    bn_null(priv);
+    ec_null(pub);
+
+    bn_new(priv);
+    ec_new(pub);
+
+    memset(key, 0, sizeof(*key));
+
+    ret = cp_ecdh_gen(priv, pub);
     if (ret == STS_ERR) {
         DEBUG("ECDH key pair creation failed. Not good :( \n");
         return CTAP1_ERR_OTHER;
     }
+
+    ec_write_bin((uint8_t*)&key->pub, sizeof(key->pub), pub, false);
+    bn_write_bin(key->priv, sizeof(key->priv), priv);
+
+    bn_free(priv);
+    ec_free(pub);
 
     return CTAP2_OK;
 }
@@ -54,58 +66,95 @@ void ctap_crypto_prng(uint8_t *dst, size_t len)
 
 int ctap_crypto_reset_key_agreement(void)
 {
-    bn_free(g_ag_key.priv);
-    ec_free(g_ag_key.pub);
-
-    bn_null(g_ag_key.priv);
-    ec_null(g_ag_key.pub);
-
-    bn_new(g_ag_key.priv);
-    ec_new(g_ag_key.pub);
-
-    return cp_ecdh_gen(g_ag_key.priv, g_ag_key.pub);
+    return init_key_agreement_key(&g_ag_key);
 }
 
 void ctap_crypto_get_key_agreement(ctap_cose_key_t *key)
 {
-    fp_write_bin(key->pubkey.x, sizeof(key->pubkey.x), g_ag_key.pub->x);
-    fp_write_bin(key->pubkey.y, sizeof(key->pubkey.y), g_ag_key.pub->y);
+    memmove(key->pubkey.x, g_ag_key.pub.x, sizeof(key->pubkey.x));
+    memmove(key->pubkey.y, g_ag_key.pub.y, sizeof(key->pubkey.y));
 }
 
-void ctap_crypto_derive_key(uint8_t *key, size_t len, ctap_cose_key_t *cose)
+/* same as cp_ecdh_key but no KDF2 */
+static int ecdh(uint8_t *key, int key_len, bn_t d, ec_t q) {
+	ec_t p;
+	bn_t x, h;
+	int result = STS_OK;
+
+	ec_null(p);
+	bn_null(x);
+	bn_null(h);
+
+	TRY {
+		ec_new(p);
+		bn_new(x);
+		bn_new(h);
+
+		ec_curve_get_cof(h);
+		if (bn_bits(h) < BN_DIGIT) {
+			ec_mul_dig(p, q, h->dp[0]);
+		} else {
+			ec_mul(p, q, h);
+		}
+		ec_mul(p, p, d);
+		if (ec_is_infty(p)) {
+			result = STS_ERR;
+		}
+		ec_get_x(x, p);
+        bn_write_bin(key, key_len, x);
+	}
+	CATCH_ANY {
+		THROW(ERR_CAUGHT);
+	}
+	FINALLY {
+		ec_free(p);
+		bn_free(x);
+		bn_free(h);
+	}
+	return result;
+}
+
+/* CTAP specification (version 20190130) section 5.5.7 */
+/* Elliptic-curve diffie hellman */
+uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose)
 {
+    assert(len == FP_BYTES);
+    assert(sizeof((*cose).pubkey.x) == FP_BYTES);
+    assert(sizeof((*cose).pubkey.y) == FP_BYTES);
     /* translate key into relic internal structure */
     uint8_t *x = cose->pubkey.x;
     uint8_t *y = cose->pubkey.y;
-    uint8_t sz = sizeof(cose->pubkey.x);
-    uint8_t temp[sz * 2 + 1];
-    uint8_t temp2[len];
+    uint8_t bG[FP_BYTES * 2 + 1];
     ec_t pub;
-    ec_t sec;
+    bn_t priv;
+    int ret;
 
-    ec_null(sec);
     ec_null(pub);
+    bn_null(priv);
 
-    ec_new(sec);
     ec_new(pub);
+    bn_new(priv);
 
-     /* point is not compressed */
-    temp[0] = 0x04;
-    memcpy(temp + 1, x, sz);
-    memcpy(temp + 1 + sz, y, sz);
+    /* public key of platformKeyAgreementKey */
+    /* flag that point is not compressed */
+    bG[0] = 0x04;
+    memcpy(bG + 1, x, FP_BYTES);
+    memcpy(bG + 1 + FP_BYTES, y, FP_BYTES);
 
-    ep_read_bin(pub, temp, sizeof(temp));
+    ep_read_bin(pub, bG, sizeof(bG));
+    bn_read_bin(priv, g_ag_key.priv, sizeof(g_ag_key.priv));
 
-    /* multiply local private key with remote public key to obtain shared secret */
-    ec_mul(sec, pub, g_ag_key.priv);
+    /* derive shared secret */
+    ret = ecdh(out, len, priv, pub);
 
-    fp_write_bin(temp2, len, sec->x);
-
-    /* sha256 of shared secret x point to obtain shared key */
-    sha256(temp2, len, key);
-
-    ec_free(sec);
     ec_free(pub);
+    bn_free(priv);
+
+    if (ret != STS_OK) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    return CTAP2_OK;
 }
 
 /* same as bc_aes_cbc_dec except that we use blockDecrypt instead of padDecrypt */
@@ -113,6 +162,7 @@ uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len)
 {
     uint8_t iv[BC_LEN] = {0};
+
     keyInstance key_inst;
 	cipherInstance cipher_inst;
 
@@ -130,7 +180,7 @@ uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		return CTAP1_ERR_OTHER;
 	}
 
-    memcpy(cipher_inst.IV, iv, BC_LEN);
+    memcpy(cipher_inst.IV, iv, sizeof(iv));
 
     /*blockDecrypt expects in_len in bits */
     in_len *= 8;

@@ -139,7 +139,7 @@ extern "C" {
 /**
  * @brief max size of username
  */
-#define CTAP_USER_MAX_NAME_SIZE 32
+#define CTAP_USER_MAX_NAME_SIZE 64
 
 /**
  * @brief max size of user id
@@ -150,6 +150,11 @@ extern "C" {
  * @brief max size of a domain name
  */
 #define CTAP_DOMAIN_NAME_MAX_SIZE 253
+
+/**
+ * @brief max size of icon
+ */
+#define CTAP_ICON_MAX_SIZE 128
 
 /**
  * @brief PIN min size
@@ -232,7 +237,7 @@ extern "C" {
 /**
  * @brief Start page for storing resident keys
  */
-#define CTAP_RK_START_PAGE 32U
+#define CTAP_RK_START_PAGE 34U
 
 #define CTAP_FLASH_ALIGN_PAD (4 - sizeof(struct ctap_resident_key) % 4)
 
@@ -512,7 +517,7 @@ typedef struct
     uint8_t id_len;                                     /**< actual length of user id */
     uint8_t name[CTAP_USER_MAX_NAME_SIZE + 1];          /**< user name */
     uint8_t display_name[CTAP_USER_MAX_NAME_SIZE + 1];  /**< user display name */
-    uint8_t icon[CTAP_DOMAIN_NAME_MAX_SIZE + 1];        /**< URL referencing user icon image */
+    uint8_t icon[CTAP_ICON_MAX_SIZE +1];                /**< URL referencing user icon image */
 } ctap_user_ent_t;
 
 /**

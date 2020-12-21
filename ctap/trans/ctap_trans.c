@@ -47,7 +47,7 @@ static void* pkt_loop(void* arg)
 
 void ctap_trans_init(void)
 {
-    g_pid = thread_create(g_stack, sizeof(g_stack), THREAD_PRIORITY_MAIN, 0,
+    g_pid = thread_create(g_stack, sizeof(g_stack), THREAD_PRIORITY_MAIN, THREAD_CREATE_STACKTEST,
                           pkt_loop, NULL, "ctap_trans_loop");
     DEBUG("ctap_trans pkt loop created \n");
 

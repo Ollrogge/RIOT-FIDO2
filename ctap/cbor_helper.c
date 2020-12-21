@@ -859,7 +859,6 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
         if (strcmp(key, "id") == 0) {
             /* parse text string will change rp->id_len to its actual size */
             rp->id_len = CTAP_DOMAIN_NAME_MAX_SIZE;
-
             ret = parse_text_string(&map, (char*)rp->id, (size_t*)&rp->id_len);
             if (ret != CborNoError) {
                 return ret;
@@ -902,7 +901,7 @@ static uint8_t parse_rp(CborValue *it, ctap_rp_ent_t* rp)
 /* parse PublicKeyCredentialUserEntity dictionary */
 static uint8_t parse_user(CborValue *it, ctap_user_ent_t *user)
 {
-    char key[16];
+    char key[24];
     size_t key_len;
     int type;
     int ret;

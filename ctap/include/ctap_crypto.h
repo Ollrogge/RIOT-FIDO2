@@ -27,9 +27,27 @@
 
 #include "ctap.h"
 
+#include "relic.h"
+
+#include "rijndael-api-fst.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define CTAP_CRYPTO_P256_P_SIZE FP_BYTES
+
+struct ctap_crypto_pub_key {
+    uint8_t comp_flag;
+    uint8_t x[FP_BYTES];
+    uint8_t y[FP_BYTES];
+};
+
+typedef struct
+{
+    struct ctap_crypto_pub_key pub;
+    uint8_t priv[FP_BYTES];
+} ctap_crypto_key_agreement_key_t;
 
 uint8_t ctap_crypto_init(void);
 
@@ -39,7 +57,7 @@ int ctap_crypto_reset_key_agreement(void);
 
 void ctap_crypto_get_key_agreement(ctap_cose_key_t *key);
 
-void ctap_crypto_derive_key(uint8_t *key, size_t len, ctap_cose_key_t *cose);
+uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose);
 
 uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
 		int in_len, uint8_t *key, int key_len);
