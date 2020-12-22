@@ -1,6 +1,3 @@
 [submodule "RIOT"]
 	path = RIOT
 	url = https://github.com/Ollrogge/RIOT
-[submodule "fido2-tests"]
-	path = fido2-tests
-	url = https://github.com/Ollrogge/fido2-tests
