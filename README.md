@@ -32,4 +32,6 @@ This project is proof-of-concept and a research platform. It is NOT meant for a 
 
 To try out the FIDO2 authentication process, visit a FIDO2 test website such as: [WebAuthn.io](https://webauthn.io/). There you can try out the registration and authentication process using this implementation.
 
-The default settings on the site should work. Just choose a username. And click register.
+The default settings on the site should work. Just choose a username and click register.
+
+Please use the Google Chrome or Chromium browser. Other browser currently do not support CBOR messages.
