@@ -35,3 +35,7 @@ To try out the FIDO2 authentication process, visit a FIDO2 test website such as:
 The default settings on the site should work. Just choose a username and click register.
 
 Please use the Google Chrome or Chromium browser. Other browser currently do not support CBOR messages.
+
+# Tests
+
+For testing, check the README of the [fido2-tests](https://github.com/Ollrogge/fido2-tests) repository.
