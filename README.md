@@ -38,4 +38,19 @@ Please use the Google Chrome or Chromium browser. Other browser currently do not
 
 # Tests
 
-For testing, check the README of the [fido2-tests](https://github.com/Ollrogge/fido2-tests) repository.
+For testing, visit the tests repository: [fido2-tests](https://github.com/Ollrogge/fido2-tests).
+
+Make sure to uncomment following section in the Makefile, in order to enable the authenticatorReset method:
+
+```bash
+#CFLAGS += -DCONFIG_CTAP_TESTING=1
+```
+
+Additionally, user presence checks can also be disabled, in order to run the checks quicker. In this case, user presence will be set to true without having to touch a button on the device.
+
+To disable user presence checks, uncomment the following section in the Makefile:
+
+```bash
+#CFLAGS += -DCONFIG_CTAP_BENCHMARKS=1
+```
+
