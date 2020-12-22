@@ -374,6 +374,10 @@ static uint8_t make_credential(CborEncoder* encoder, size_t size, uint8_t* req_r
 
     memset(&req, 0, sizeof(req));
 
+    /* set default values for options */
+    req.options.rk = false;
+    req.options.uv = false;
+
     ret = cbor_helper_parse_make_credential_req(&req, size, req_raw);
 
     if (ret != CTAP2_OK) {
@@ -629,6 +633,10 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
     memset(&g_assert_state, 0, sizeof(g_assert_state));
     memset(&req, 0, sizeof(req));
 
+    /* set default values for options */
+    req.options.up = true;
+    req.options.uv = false;
+
     ret = cbor_helper_parse_get_assertion_req(&req, size, req_raw);
 
     if (ret != CTAP2_OK) {
@@ -677,9 +685,14 @@ static uint8_t get_assertion(CborEncoder *encoder, size_t size, uint8_t *req_raw
         g_assert_state.up = true;
     }
 #else
-    if (req.options.up && user_presence_test() == CTAP2_OK) {
-        up = true;
-        g_assert_state.up = true;
+    if (req.options.up) {
+        if (user_presence_test() == CTAP2_OK) {
+            up = true;
+            g_assert_state.up = true;
+        }
+        else {
+            return CTAP2_ERR_OPERATION_DENIED;
+        }
     }
 #endif
 
