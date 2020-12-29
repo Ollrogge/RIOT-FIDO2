@@ -39,8 +39,24 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Write to flash memory and verify the given page against the given data
+ *
+ * @param[in] page       page to write to
+ * @param[in] offset     offset into the page
+ * @param[in] data     data to write and compare against
+ *
+ * @return CTAP status code
+ */
 int ctap_mem_write_and_verify(int page, int offset, const void *data, size_t len);
 
+/**
+ * @brief Read the given page into the given memory location.
+ *
+ * @param[in] page       page to write to
+ * @param[in] data       memory to write the page to
+ *
+ */
 void ctap_mem_read(int page, void *data);
 
 

@@ -129,8 +129,8 @@ uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_
 /**
  * @brief Encode PIN tries left
  *
- * @param[in] encoder           CBOR encoder
- * @param[in] token             amount of tries left
+ * @param[in] encoder            CBOR encoder
+ * @param[in] tries_left         amount of tries left
  *
  * @return CTAP status code
  */
