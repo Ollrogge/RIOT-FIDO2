@@ -101,15 +101,16 @@ extern "C" {
  *
  * @{
  */
-#define CTAP_HID_ERROR_INVALID_CMD      0x01    /**< The command in the request is invalid */
-#define CTAP_HID_ERROR_INVALID_PAR      0x02    /**< The parameter(s) in the request is invalid */
-#define CTAP_HID_ERROR_INVALID_LEN      0x03    /**< The length field (BCNT) is invalid for the request */
-#define CTAP_HID_ERROR_INVALID_SEQ      0x04    /**< The sequence does not match expected value */
-#define CTAP_HID_ERROR_MSG_TIMEOUT      0x05    /**< The message has timed out */
-#define CTAP_HID_ERROR_CHANNEL_BUSY     0x06    /**< The device is busy for the requesting channel */
-#define CTAP_HID_ERROR_LOCK_REQUIRED    0x0a    /**< Command requires channel lock */
-#define CTAP_HID_ERROR_INVALID_CHANNEL  0x0b    /**< CID is not valid. */
-#define CTAP_HID_ERROR_OTHER            0x7f    /**< Unspecified error */
+#define CTAP_HID_OK                   0x00    /**< Success */
+#define CTAP_HID_ERR_INVALID_CMD      0x01    /**< The command in the request is invalid */
+#define CTAP_HID_ERR_INVALID_PAR      0x02    /**< The parameter(s) in the request is invalid */
+#define CTAP_HID_ERR_INVALID_LEN      0x03    /**< The length field (BCNT) is invalid for the request */
+#define CTAP_HID_ERR_INVALID_SEQ      0x04    /**< The sequence does not match expected value */
+#define CTAP_HID_ERR_MSG_TIMEOUT      0x05    /**< The message has timed out */
+#define CTAP_HID_ERR_CHANNEL_BUSY     0x06    /**< The device is busy for the requesting channel */
+#define CTAP_HID_ERR_LOCK_REQUIRED    0x0a    /**< Command requires channel lock */
+#define CTAP_HID_ERR_INVALID_CHANNEL  0x0b    /**< CID is not valid. */
+#define CTAP_HID_ERR_OTHER            0x7f    /**< Unspecified error */
 /** @} */
 
 /**
@@ -234,7 +235,7 @@ void ctap_trans_hid_create(void);
  * @param[in] pkt_raw   CTAP_HID packet
  *
  */
-void ctap_trans_hid_handle_packet(uint8_t *pkt_raw);
+void ctap_trans_hid_handle_packet(void *pkt_raw);
 
 /**
  * @brief Send keepalive packet

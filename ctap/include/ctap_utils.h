@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void print_hex(uint8_t* data, size_t size);
+void print_hex(const uint8_t* data, size_t size);
 
 int timestamp(void);
 

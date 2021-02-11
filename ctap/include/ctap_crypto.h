@@ -60,25 +60,25 @@ void ctap_crypto_get_key_agreement(ctap_cose_key_t *key);
 uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose);
 
 uint8_t ctap_crypto_aes_dec(uint8_t *out, int *out_len, uint8_t *in,
-		int in_len, uint8_t *key, int key_len);
+		int in_len, const uint8_t *key, int key_len);
 
 uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
-		int in_len, uint8_t *key, int key_len);
+		int in_len, const uint8_t *key, int key_len);
 
 uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key);
 
 uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
-                            size_t *sig_len, uint8_t *key, size_t key_len);
+                            size_t *sig_len, const uint8_t *key, size_t key_len);
 
-uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, uint8_t *in,
+uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, const uint8_t *in,
                                 size_t in_len, uint8_t *a, size_t a_len,
-                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
-                                uint8_t *key);
+                                uint8_t mac_len, uint8_t l, const uint8_t *nonce,
+                                const uint8_t *key);
 
-uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, uint8_t *in,
+uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, const uint8_t *in,
                                 size_t in_len, uint8_t *a, size_t a_len,
-                                uint8_t mac_len, uint8_t l, uint8_t *nonce,
-                                uint8_t *key);
+                                uint8_t mac_len, uint8_t l, const uint8_t *nonce,
+                                const uint8_t *key);
 
 #ifdef __cplusplus
 }

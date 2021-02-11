@@ -797,8 +797,9 @@ size_t ctap_handle_request(uint8_t* req, size_t size, ctap_resp_t* resp,
  *
  * @return CTAP status code
  */
-uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len,
-                            uint8_t *client_data_hash, ctap_resident_key_t *rk,
+uint8_t ctap_get_attest_sig(const uint8_t *auth_data, size_t auth_data_len,
+                            const uint8_t *client_data_hash,
+                            const ctap_resident_key_t *rk,
                             uint8_t* sig, size_t *sig_len);
 
 /**

@@ -9,7 +9,7 @@
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
-void print_hex(uint8_t* data, size_t size)
+void print_hex(const uint8_t* data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
         DEBUG("%02x", data[i]);

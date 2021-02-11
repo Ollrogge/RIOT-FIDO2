@@ -14,9 +14,9 @@ static uint8_t parse_allow_list(CborValue *it, CborValue *allow_list, size_t *al
 static uint8_t parse_exclude_list(CborValue *it, CborValue *exclude_list, size_t *exclude_list_len);
 static uint8_t parse_options(CborValue *it, ctap_options_t *options);
 static uint8_t parse_cose_key(CborValue *it, ctap_cose_key_t *cose_key);
-static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t *key);
-static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr, bool rk);
-static uint8_t encode_user_entity(CborEncoder *it, ctap_resident_key_t *rk);
+static uint8_t encode_cose_key(CborEncoder *cose_key, const ctap_cose_key_t *key);
+static uint8_t encode_credential(CborEncoder *encoder, const void *cred_ptr, bool rk);
+static uint8_t encode_user_entity(CborEncoder *it, const ctap_resident_key_t *rk);
 
 static uint8_t parse_fixed_size_byte_array(CborValue *map, uint8_t* dst, size_t *len);
 static uint8_t parse_byte_array(CborValue *it, uint8_t* dst, size_t *len);
@@ -24,7 +24,7 @@ static uint8_t parse_text_string(CborValue *it, char* dst, size_t* len);
 static uint8_t parse_int(CborValue *it, int *num);
 
 /* CTAP specification (version 20190130) section 5.4 */
-uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
+uint8_t cbor_helper_encode_info(CborEncoder *encoder, const ctap_info_t *info)
 {
     int ret;
     size_t sz = 0;
@@ -134,10 +134,11 @@ uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info)
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash,
-                                            ctap_resident_key_t *rk,
-                                            uint8_t valid_cred_count)
+uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder,
+                                        const ctap_auth_data_header_t *auth_data,
+                                        const uint8_t *client_data_hash,
+                                        ctap_resident_key_t *rk,
+                                        uint8_t valid_cred_count)
 {
     int ret;
     CborEncoder map;
@@ -221,8 +222,10 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash, ctap_resident_key_t *rk)
+uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder,
+                                              const ctap_auth_data_t *auth_data,
+                                              const uint8_t *client_data_hash,
+                                              ctap_resident_key_t *rk)
 {
     int ret;
     CborEncoder map;
@@ -234,7 +237,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     CborEncoder cose_key;
     CborEncoder attest_stmt_map;
 
-    ctap_attested_cred_data_header_t *cred_header = &auth_data->attested_cred_data.header;
+    const ctap_attested_cred_data_header_t *cred_header = &auth_data->attested_cred_data.header;
 
     uint16_t cred_id_sz = (cred_header->cred_len_h << 8) | cred_header->cred_len_l;
 
@@ -308,7 +311,7 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
     return CTAP2_OK;
 }
 
-static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr, bool rk)
+static uint8_t encode_credential(CborEncoder *encoder, const void *cred_ptr, bool rk)
 {
     CborEncoder desc;
     int ret;
@@ -344,7 +347,8 @@ static uint8_t encode_credential(CborEncoder *encoder, void *cred_ptr, bool rk)
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_cose_key_t *key)
+uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder,
+                                        const ctap_cose_key_t *key)
 {
     int ret;
     CborEncoder map;
@@ -404,7 +408,7 @@ uint8_t cbor_helper_encode_pin_token(CborEncoder *encoder, uint8_t *token, size_
     return CTAP2_OK;
 }
 
-static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
+static uint8_t encode_user_entity(CborEncoder *encoder, const ctap_resident_key_t *rk)
 {
     int ret;
     CborEncoder map;
@@ -424,7 +428,7 @@ static uint8_t encode_user_entity(CborEncoder *encoder, ctap_resident_key_t *rk)
 }
 
 /* https://tools.ietf.org/html/rfc8152#page-34 Section 13.1.1 */
-static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t* key)
+static uint8_t encode_cose_key(CborEncoder *cose_key, const ctap_cose_key_t* key)
 {
     int ret;
     CborEncoder map;
@@ -463,7 +467,7 @@ static uint8_t encode_cose_key(CborEncoder *cose_key, ctap_cose_key_t* key)
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size, uint8_t *req_raw)
+uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size, const uint8_t *req_raw)
 {
     int ret;
     int key;
@@ -557,7 +561,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
 }
 
 uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size,
-                                         uint8_t *req_raw)
+                                         const uint8_t *req_raw)
 {
     int ret;
     int key;
@@ -642,7 +646,7 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
     return CTAP2_OK;
 }
 
-uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size, uint8_t* req_raw)
+uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size, const uint8_t* req_raw)
 {
     int ret, key, temp;
     size_t len;

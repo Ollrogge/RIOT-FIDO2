@@ -46,10 +46,10 @@ static uint8_t get_pin_token(CborEncoder *encoder, ctap_client_pin_req_t *req,
                              bool (*should_cancel)(void));
 static uint8_t key_agreement(CborEncoder *encoder);
 static uint8_t save_rk(ctap_resident_key_t *rk);
-static bool ks_are_equal(ctap_resident_key_t *k1, ctap_resident_key_t *k2);
+static bool ks_are_equal(const ctap_resident_key_t *k1, const ctap_resident_key_t *k2);
 static int cred_cmp(const void *a, const void *b);
 static uint8_t save_pin(uint8_t *pin, size_t len);
-static int save_state(ctap_state_t *state);
+static int save_state(const ctap_state_t *state);
 static void load_state(ctap_state_t *state);
 static bool pin_is_set(void);
 static bool pin_protocol_supported(uint8_t version);
@@ -249,7 +249,6 @@ static uint8_t decrement_pin_attempts(void)
 
 static uint8_t get_remaining_pin_attempts(void)
 {
-    DEBUG("Rem PIN attempts: %u \n", g_state.rem_pin_att);
     return g_state.rem_pin_att;
 }
 
@@ -1187,7 +1186,7 @@ static int cred_cmp(const void *a, const void *b)
 }
 
 
-static bool ks_are_equal(ctap_resident_key_t *k1, ctap_resident_key_t *k2)
+static bool ks_are_equal(const ctap_resident_key_t *k1, const ctap_resident_key_t *k2)
 {
     return memcmp(k1->rp_id_hash, k2->rp_id_hash, sizeof(k1->rp_id_hash)) == 0 &&
            memcmp(k1->user_id, k2->user_id, sizeof(k1->user_id)) == 0;
@@ -1270,7 +1269,7 @@ static uint8_t save_rk(ctap_resident_key_t *rk)
     return CTAP2_OK;
 }
 
-static int save_state(ctap_state_t * state)
+static int save_state(const ctap_state_t * state)
 {
     /* ensure 4 byte alignment */
     uint8_t page[sizeof(*state) + 4 - sizeof(state) % 4];
@@ -1420,21 +1419,21 @@ static uint8_t make_auth_data_attest(ctap_rp_ent_t *rp, ctap_user_ent_t *user,
     return CTAP2_OK;
 }
 
-uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* n, ctap_cred_id_t* id)
+uint8_t ctap_encrypt_rk(ctap_resident_key_t *rk, uint8_t* nonce, ctap_cred_id_t* id)
 {
     int ret;
     memset(id, 0, sizeof(*id));
 
     ret = ctap_crypto_aes_ccm_enc((uint8_t *)id, (uint8_t *)rk,
                                 CTAP_CREDENTIAL_ID_ENC_SIZE, NULL, 0,
-                                CTAP_AES_CCM_MAC_SIZE, CTAP_AES_CCM_L, n,
+                                CTAP_AES_CCM_MAC_SIZE, CTAP_AES_CCM_L, nonce,
                                 g_state.cred_key);
 
     if (ret != CTAP2_OK) {
         return ret;
     }
 
-    memmove(id->nonce, n, CTAP_AES_CCM_NONCE_SIZE);
+    memmove(id->nonce, nonce, CTAP_AES_CCM_NONCE_SIZE);
 
     return CTAP2_OK;
 }
@@ -1461,8 +1460,9 @@ static uint8_t ctap_decrypt_rk(ctap_resident_key_t *rk, ctap_cred_id_t *id)
     return CTAP2_OK;
 }
 
-uint8_t ctap_get_attest_sig(uint8_t *auth_data, size_t auth_data_len,
-                            uint8_t *client_data_hash, ctap_resident_key_t *rk,
+uint8_t ctap_get_attest_sig(const uint8_t *auth_data, size_t auth_data_len,
+                            const uint8_t *client_data_hash,
+                            const ctap_resident_key_t *rk,
                             uint8_t* sig, size_t *sig_len)
 {
     sha256_context_t ctx;

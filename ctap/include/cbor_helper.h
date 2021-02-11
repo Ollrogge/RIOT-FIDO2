@@ -37,7 +37,7 @@ extern "C" {
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info);
+uint8_t cbor_helper_encode_info(CborEncoder *encoder, const ctap_info_t *info);
 
 /**
  * @brief Parse raw MakeCredential request into struct
@@ -49,7 +49,7 @@ uint8_t cbor_helper_encode_info(CborEncoder *encoder, ctap_info_t *info);
  * @return CTAP status code
  */
 uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, size_t size,
-                                              uint8_t* req_raw);
+                                              const uint8_t* req_raw);
 
 /**
  * @brief Parse raw GetAssertion request into struct
@@ -61,7 +61,7 @@ uint8_t cbor_helper_parse_make_credential_req(ctap_make_credential_req_t *req, s
  * @return CTAP status code
  */
 uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_t size,
-                                              uint8_t *req_raw);
+                                              const uint8_t *req_raw);
 
 
 /**
@@ -74,8 +74,7 @@ uint8_t cbor_helper_parse_get_assertion_req(ctap_get_assertion_req_t *req, size_
  * @return CTAP status code
  */
 uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size,
-                                         uint8_t *req_raw);
-
+                                         const uint8_t *req_raw);
 /**
  * @brief Encode attestation object
  *
@@ -86,8 +85,10 @@ uint8_t cbor_helper_parse_client_pin_req(ctap_client_pin_req_t *req, size_t size
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_data_t *auth_data,
-                                              uint8_t *client_data_hash, ctap_resident_key_t *rk);
+uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder,
+                                              const ctap_auth_data_t *auth_data,
+                                              const uint8_t *client_data_hash,
+                                              ctap_resident_key_t *rk);
 
 /**
  * @brief Encode assertion object
@@ -100,10 +101,11 @@ uint8_t cbor_helper_encode_attestation_object(CborEncoder *encoder, ctap_auth_da
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data_header_t *auth_data,
-                                            uint8_t *client_data_hash,
-                                            ctap_resident_key_t *rk,
-                                            uint8_t valid_cred_count);
+uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder,
+                                        const ctap_auth_data_header_t *auth_data,
+                                        const uint8_t *client_data_hash,
+                                        ctap_resident_key_t *rk,
+                                        uint8_t valid_cred_count);
 
 /**
  * @brief Encode key agreement
@@ -113,7 +115,8 @@ uint8_t cbor_helper_encode_assertion_object(CborEncoder *encoder, ctap_auth_data
  *
  * @return CTAP status code
  */
-uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder, ctap_cose_key_t *key);
+uint8_t cbor_helper_encode_key_agreement(CborEncoder *encoder,
+                                        const ctap_cose_key_t *key);
 
 /**
  * @brief Encode encrypted pin token

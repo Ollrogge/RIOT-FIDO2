@@ -4,7 +4,7 @@
 #define ENABLE_DEBUG    (0)
 #include "debug.h"
 
-static uint8_t create_usb(void* report_desc, size_t len);
+static uint8_t create_usb(const void* report_desc, size_t len);
 static void ctap_trans_write_usb(const void *buffer, size_t len);
 static int ctap_trans_read_timeout_usb(void* buffer, size_t size,
                                         uint32_t timeout);
@@ -14,9 +14,9 @@ static int ctap_trans_read_timeout_usb(void* buffer, size_t size,
 #include "usb/usbus.h"
 static char usb_stack[USBUS_STACKSIZE];
 static usbus_t usbus;
-ssize_t usb_hid_io_write(const void* buffer, size_t size);
+size_t usb_hid_io_write(const void* buffer, size_t size);
 int usb_hid_io_read_timeout(void* buffer, size_t size, uint32_t timeout);
-void usb_hid_io_init(usbus_t *usbus, uint8_t *report_desc,
+void usb_hid_io_init(usbus_t *usbus, const uint8_t *report_desc,
                     size_t report_desc_size);
 #endif
 
@@ -54,11 +54,11 @@ void ctap_trans_init(void)
     ctap_trans_hid_create();
 }
 
-uint8_t ctap_trans_create(uint8_t type, void* data, size_t len)
+uint8_t ctap_trans_create(uint8_t type, void* report_desc, size_t len)
 {
     switch (type) {
         case CTAP_TRANS_USB:
-            return create_usb((uint8_t*)data, len);
+            return create_usb(report_desc, len);
             break;
         default:
             return CTAP1_ERR_OTHER;
@@ -99,7 +99,7 @@ void ctap_trans_write_keepalive(uint8_t type, uint8_t status)
     }
 }
 
-static uint8_t create_usb(void* report_desc, size_t len)
+static uint8_t create_usb(const void* report_desc, size_t len)
 {
 #ifdef CONFIG_CTAP_NATIVE
    (void)report_desc;

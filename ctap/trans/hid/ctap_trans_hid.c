@@ -38,27 +38,29 @@ static uint8_t report_desc_ctap[] = {
 //todo: how many concurrent devices should be allowed ?
 static ctap_hid_cid_t cids[CTAP_HID_CIDS_MAX];
 
-static uint8_t is_init_type_pkt(ctap_hid_pkt_t* pkt);
+static bool is_init_type_pkt(const ctap_hid_pkt_t* pkt);
 
 static ctap_hid_buffer_t ctap_buffer;
 
-static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt);
+static uint8_t buffer_pkt(const ctap_hid_pkt_t *pkt);
 
-static void send_init_response(uint32_t, uint32_t, uint8_t*);
 static void send_error_response(uint32_t cid, uint8_t err);
-static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size);
+static void ctap_hid_write(uint8_t cmd, uint32_t cid, const void* _data, size_t size);
 
-static uint32_t handle_init_packet(uint32_t cid, uint16_t bcnt, uint8_t* payload);
 static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t* payload);
 static void wink(uint32_t cid, uint8_t cmd);
-static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce);
+
+static uint32_t handle_init_packet(uint32_t cid, uint16_t bcnt,
+                                   const uint8_t* nonce);
+static void send_init_response(uint32_t cid_old, uint32_t cid_new,
+                               const uint8_t* nonce);
 
 static int8_t refresh_cid(uint32_t cid);
 static int8_t add_cid(uint32_t cid);
 static int8_t delete_cid(uint32_t cid);
-static uint8_t cid_exists(uint32_t cid);
+static bool cid_exists(uint32_t cid);
 static uint32_t get_new_cid(void);
-static uint16_t get_packet_len(ctap_hid_pkt_t* pkt);
+static uint16_t get_packet_len(const ctap_hid_pkt_t* pkt);
 
 static void pkt_worker(void);
 
@@ -66,7 +68,7 @@ static void reset_ctap_buffer(void);
 
 static bool is_busy = false;
 
-static uint8_t is_init_type_pkt(ctap_hid_pkt_t *pkt)
+static bool is_init_type_pkt(const ctap_hid_pkt_t *pkt)
 {
     return ((pkt->init.cmd & CTAP_HID_INIT_PACKET) == CTAP_HID_INIT_PACKET);
 }
@@ -78,10 +80,7 @@ static void reset_ctap_buffer(void)
 
 static bool should_cancel(void)
 {
-    bool ret;
-    ret = ctap_buffer.should_cancel;
-
-    return ret;
+    return ctap_buffer.should_cancel;
 }
 
 void ctap_trans_hid_check_timeouts(void)
@@ -93,7 +92,7 @@ void ctap_trans_hid_check_timeouts(void)
             (now - cids[i].last_used) >= CTAP_HID_TRANSACTION_TIMEOUT &&
             ctap_buffer.cid == cids[i].cid && !ctap_buffer.is_locked) {
 
-            send_error_response(cids[i].cid, CTAP_HID_ERROR_MSG_TIMEOUT);
+            send_error_response(cids[i].cid, CTAP_HID_ERR_MSG_TIMEOUT);
             delete_cid(cids[i].cid);
             reset_ctap_buffer();
 
@@ -121,7 +120,7 @@ static int8_t add_cid(uint32_t cid)
             cids[i].cid = cid;
             cids[i].last_used = xtimer_now_usec64();
 
-            return 0;
+            return CTAP_HID_OK;
         }
 
         if (cids[i].last_used < oldest) {
@@ -135,10 +134,10 @@ static int8_t add_cid(uint32_t cid)
         cids[index_oldest].taken = 1;
         cids[index_oldest].cid = cid;
         cids[index_oldest].last_used = xtimer_now_usec64();
-        return 0;
+        return CTAP_HID_OK;
     }
 
-    return -1;
+    return CTAP_HID_ERR_OTHER;
 }
 
 static int8_t refresh_cid(uint32_t cid)
@@ -146,10 +145,10 @@ static int8_t refresh_cid(uint32_t cid)
     for (int i = 0; i < CTAP_HID_CIDS_MAX; i++) {
         if (cids[i].cid == cid) {
             cids[i].last_used = xtimer_now_usec64();
-            return 0;
+            return CTAP_HID_OK;
         }
     }
-    return -1;
+    return CTAP_HID_ERR_OTHER;
 }
 
 static int8_t delete_cid(uint32_t cid)
@@ -159,23 +158,23 @@ static int8_t delete_cid(uint32_t cid)
             cids[i].taken = 0;
             cids[i].cid = 0;
 
-            return 0;
+            return CTAP_HID_OK;
         }
     }
-    return -1;
+    return CTAP_HID_ERR_OTHER;
 }
 
-static uint8_t cid_exists(uint32_t cid)
+static bool cid_exists(uint32_t cid)
 {
     for (int i = 0; i < CTAP_HID_CIDS_MAX; i++) {
         if (cids[i].cid == cid) {
-            return 1;
+            return true;
         }
     }
-    return 0;
+    return false;
 }
 
-static uint16_t get_packet_len(ctap_hid_pkt_t* pkt)
+static uint16_t get_packet_len(const ctap_hid_pkt_t* pkt)
 {
     return (uint16_t)((pkt->init.bcnth << 8) | pkt->init.bcntl);
 }
@@ -185,7 +184,7 @@ void ctap_trans_hid_create(void)
     ctap_trans_create(CTAP_TRANS_USB , report_desc_ctap, sizeof(report_desc_ctap));
 }
 
-static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
+static uint8_t buffer_pkt(const ctap_hid_pkt_t *pkt)
 {
     if (is_init_type_pkt(pkt)) {
         /* received should_cancel for cid being buffered atm, should_cancel as
@@ -202,13 +201,13 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
         /* check for init transaction size described in CTAP specification
            (version 20190130) section 8.1.9.1.3 */
         if (pkt->init.cmd == CTAP_HID_COMMAND_INIT && ctap_buffer.bcnt != 8) {
-            ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
+            ctap_buffer.err = CTAP_HID_ERR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
 
         /* don't allow transactions bigger than max buffer size */
         if (ctap_buffer.bcnt > CTAP_HID_BUFFER_SIZE) {
-            ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
+            ctap_buffer.err = CTAP_HID_ERR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
 
@@ -227,13 +226,13 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
 
         /* seqs have to increase sequentially */
         if (pkt->cont.seq != ctap_buffer.seq) {
-            ctap_buffer.err = CTAP_HID_ERROR_INVALID_SEQ;
+            ctap_buffer.err = CTAP_HID_ERR_INVALID_SEQ;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
 
         /* check for potential buffer overflow */
         if (ctap_buffer.offset + CTAP_HID_CONT_PAYLOAD_SIZE > CTAP_HID_BUFFER_SIZE) {
-            ctap_buffer.err = CTAP_HID_ERROR_INVALID_LEN;
+            ctap_buffer.err = CTAP_HID_ERR_INVALID_LEN;
             return CTAP_HID_BUFFER_STATUS_ERROR;
         }
 
@@ -252,7 +251,7 @@ static uint8_t buffer_pkt(ctap_hid_pkt_t *pkt)
            CTAP_HID_BUFFER_STATUS_DONE : CTAP_HID_BUFFER_STATUS_BUFFERING;
 }
 
-void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
+void ctap_trans_hid_handle_packet(void *pkt_raw)
 {
     ctap_hid_pkt_t *pkt = (ctap_hid_pkt_t*)pkt_raw;
     uint32_t cid = pkt->cid;
@@ -260,7 +259,7 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
 
     if (cid == 0x00) {
         /* cid = 0x00 always invalid */
-        send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
+        send_error_response(cid, CTAP_HID_ERR_INVALID_CHANNEL);
     }
     else if(is_busy) {
         if (ctap_buffer.cid == cid) {
@@ -277,12 +276,12 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
                 }
                 /* random init type pkt. invalid sequence of pkts */
                 else {
-                    send_error_response(cid, CTAP_HID_ERROR_INVALID_SEQ);
+                    send_error_response(cid, CTAP_HID_ERR_INVALID_SEQ);
                 }
             }
             /* packet for this cid is currently being worked */
             else if (ctap_buffer.is_locked) {
-                send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
+                send_error_response(cid, CTAP_HID_ERR_CHANNEL_BUSY);
             }
             else {
                 /* buffer cont packets */
@@ -291,7 +290,7 @@ void ctap_trans_hid_handle_packet(uint8_t *pkt_raw)
         }
         /* transactions are atomic, deny all other cids if busy with one cid */
         else {
-            send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
+            send_error_response(cid, CTAP_HID_ERR_CHANNEL_BUSY);
         }
     }
     else {
@@ -334,19 +333,19 @@ static void pkt_worker(void)
     else {
         /* broadcast cid only allowed for CTAP_HID_COMMAND_INIT */
         if (cid == CTAP_HID_BROADCAST_CID || cid == 0) {
-            send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
+            send_error_response(cid, CTAP_HID_ERR_INVALID_CHANNEL);
         }
          /* readding deleted cid */
          /* todo: would it be possible to steal a channel ? */
         else if (!cid_exists(cid) && add_cid(cid) == -1) {
-            send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
+            send_error_response(cid, CTAP_HID_ERR_CHANNEL_BUSY);
         }
         else {
             switch(cmd) {
                 case CTAP_HID_COMMAND_MSG:
                     /* not implemented */
                     DEBUG("CTAP_HID: MSG COMMAND \n");
-                    send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
+                    send_error_response(cid, CTAP_HID_ERR_INVALID_CMD);
                     break;
                 case CTAP_HID_COMMAND_CBOR:
                     DEBUG("CTAP_HID: CBOR COMMAND \n");
@@ -367,7 +366,7 @@ static void pkt_worker(void)
                      */
                     break;
                 default:
-                    send_error_response(cid, CTAP_HID_ERROR_INVALID_CMD);
+                    send_error_response(cid, CTAP_HID_ERR_INVALID_CMD);
                     DEBUG("Ctaphid: unknown command %u \n", cmd);
             }
         }
@@ -405,29 +404,30 @@ static void wink(uint32_t cid, uint8_t cmd)
 }
 
 /* CTAP specification (version 20190130) section 8.1.9.1.3 */
-static uint32_t handle_init_packet(uint32_t cid, uint16_t bcnt, uint8_t* payload)
+static uint32_t handle_init_packet(uint32_t cid, uint16_t bcnt,
+                                   const uint8_t* nonce)
 {
     uint32_t cid_new = 0;
 
     /* cid 0 is reserved */
     if (cid == 0) {
-        send_error_response(cid, CTAP_HID_ERROR_INVALID_CHANNEL);
+        send_error_response(cid, CTAP_HID_ERR_INVALID_CHANNEL);
         return 0;
     }
     /* check for len described in standard */
     if (bcnt != 8)
     {
-        send_error_response(cid, CTAP_HID_ERROR_INVALID_LEN);
+        send_error_response(cid, CTAP_HID_ERR_INVALID_LEN);
         return 0;
     }
     /* create new channel */
     if (cid == CTAP_HID_BROADCAST_CID) {
         cid_new = get_new_cid();
         if (add_cid(cid_new) == -1) {
-            send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
+            send_error_response(cid, CTAP_HID_ERR_CHANNEL_BUSY);
             return 0;
         }
-        send_init_response(cid, cid_new, payload);
+        send_init_response(cid, cid_new, nonce);
     }
     /* synchronize channel */
     else {
@@ -435,18 +435,19 @@ static uint32_t handle_init_packet(uint32_t cid, uint16_t bcnt, uint8_t* payload
         if (!cid_exists(cid)) {
             if (add_cid(cid) == -1) {
                 /* reached cid limit */
-                send_error_response(cid, CTAP_HID_ERROR_CHANNEL_BUSY);
+                send_error_response(cid, CTAP_HID_ERR_CHANNEL_BUSY);
                 return 0;
             }
         }
-        send_init_response(cid, cid, payload);
+        send_init_response(cid, cid, nonce);
     }
 
     return cid_new;
 }
 
 /* CTAP specification (version 20190130) section 8.1.9.1.2 */
-static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t* payload)
+static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd,
+                               uint8_t* payload)
 {
     ctap_resp_t resp;
     uint8_t err;
@@ -454,7 +455,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     uint8_t type = *payload;
 
     if (bcnt == 0) {
-        err = CTAP_HID_ERROR_INVALID_LEN;
+        err = CTAP_HID_ERR_INVALID_LEN;
         cmd = CTAP_HID_COMMAND_ERROR;
         ctap_hid_write(cmd, cid, &err, sizeof(err));
         return;
@@ -465,7 +466,7 @@ static void handle_cbor_packet(uint32_t cid, uint16_t bcnt, uint8_t cmd, uint8_t
     timestamp();
     size = ctap_handle_request(payload, bcnt, &resp, &should_cancel);
 
-    DEBUG("OPERATION TOOK: %u usec type: %u \n", timestamp(), type);
+    DEBUG("ctap_trans_hid cbor operation took: %u usec type: %u \n", timestamp(), type);
 
     if (resp.status == CTAP2_OK && size > 0) {
         /* status + data */
@@ -485,13 +486,14 @@ void ctap_trans_hid_send_keepalive(uint8_t status)
 
 static void send_error_response(uint32_t cid, uint8_t err)
 {
-    DEBUG("CTAP_HID ERR RESPONSE: %02x \n", err);
+    DEBUG("ctap_trans_hid err resp: %02x \n", err);
     ctap_hid_write(CTAP_HID_COMMAND_ERROR, cid, &err, sizeof(err));
 }
 
-static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonce)
+static void send_init_response(uint32_t cid_old, uint32_t cid_new,
+                               const uint8_t* nonce)
 {
-    DEBUG("USB_HID_CTAP: send_init_response %lu %lu\n ", cid_old, cid_new);
+    DEBUG("ctap_trans_hid: send_init_response %lu %lu\n ", cid_old, cid_new);
 
     ctap_hid_init_resp_t resp;
     memset(&resp, 0, sizeof(ctap_hid_init_resp_t));
@@ -505,14 +507,15 @@ static void send_init_response(uint32_t cid_old, uint32_t cid_new, uint8_t* nonc
 
     uint8_t cmd = (CTAP_HID_INIT_PACKET | CTAP_HID_COMMAND_INIT);
 
-    resp.capabilities = CTAP_HID_CAPABILITY_CBOR | CTAP_HID_CAPABILITY_WINK | CTAP_HID_CAPABILITY_NMSG;
+    resp.capabilities = CTAP_HID_CAPABILITY_CBOR | CTAP_HID_CAPABILITY_WINK
+                        | CTAP_HID_CAPABILITY_NMSG;
 
     ctap_hid_write(cmd, cid_old, &resp, sizeof(ctap_hid_init_resp_t));
 }
 
-static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
+static void ctap_hid_write(uint8_t cmd, uint32_t cid, const void* _data, size_t size)
 {
-    uint8_t * data = (uint8_t *)_data;
+    const uint8_t* data = (uint8_t*)_data;
     uint8_t buf[CONFIG_USBUS_HID_INTERRUPT_EP_SIZE];
     int offset = 0;
     int bytes_written = 0;
@@ -524,7 +527,7 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
     buf[offset++] = (size & 0xff00) >> 8;
     buf[offset++] = (size & 0xff) >> 0;
 
-    if (_data == NULL) {
+    if (data == NULL) {
         memset(buf + offset, 0, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE - offset);
         ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
         return;
@@ -550,7 +553,7 @@ static void ctap_hid_write(uint8_t cmd, uint32_t cid, void* _data, size_t size)
         }
 
         buf[offset++] = data[i];
-        bytes_written += 1;
+        bytes_written++;
 
         if (offset == CONFIG_USBUS_HID_INTERRUPT_EP_SIZE) {
             ctap_trans_write(CTAP_TRANS_USB, buf, CONFIG_USBUS_HID_INTERRUPT_EP_SIZE);
