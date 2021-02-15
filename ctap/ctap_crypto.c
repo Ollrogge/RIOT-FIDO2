@@ -322,7 +322,6 @@ uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 #else
     ec_t pub;
     bn_t priv;
-    int ret;
 
     ec_null(pub);
     bn_null(priv);

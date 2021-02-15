@@ -12,9 +12,9 @@ choice CTAP_CRYPTO_LIB
         Choose which cryptographic library you want to use
 
 config CTAP_CRYPTO_MICRO_ECC
-    bool "0"
+    bool "MICRO_ECC"
 
 config CTAP_CRYPTO_RELIC
-    bool "1"
+    bool "RELIC"
 
 endchoice
