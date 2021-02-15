@@ -18,7 +18,7 @@ extern "C" {
 
 void ctap_trans_init(void);
 
-uint8_t ctap_trans_create(uint8_t type, void* report_desc, size_t len);
+uint8_t ctap_trans_create(uint8_t type, const void* report_desc, size_t len);
 
 int ctap_trans_read_timeout(uint8_t type, void* buffer, size_t size,
                             uint32_t timeout);

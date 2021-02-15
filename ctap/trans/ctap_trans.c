@@ -54,7 +54,7 @@ void ctap_trans_init(void)
     ctap_trans_hid_create();
 }
 
-uint8_t ctap_trans_create(uint8_t type, void* report_desc, size_t len)
+uint8_t ctap_trans_create(uint8_t type, const void* report_desc, size_t len)
 {
     switch (type) {
         case CTAP_TRANS_USB:

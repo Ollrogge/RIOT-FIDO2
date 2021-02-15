@@ -25,16 +25,9 @@ USB_PID ?= ${USB_PID_TESTING}
 
 
 #Enable authenticatorReset method
-#CFLAGS += -DCONFIG_CTAP_TESTING=1
+CFLAGS += -DCONFIG_CTAP_TESTING=1
 
 #Disable user presence tests for benchmarking purposes
 #CFLAGS += -DCONFIG_CTAP_BENCHMARKS=1
-
-#todo: where to put presets ?
-DEVICE_AAGUID_TESTING="0x9c, 0x29, 0x58, 0x65, 0xfa, 0x2c, 0x36, 0xb7, \
-                      0x05, 0xa4, 0x23, 0x20, 0xaf, 0x9c, 0x8f, 0x16"
-
-#AAGUID has to be 128 bits
-CFLAGS += -DCONFIG_CTAP_AAGUID=${DEVICE_AAGUID_TESTING}
 
 include $(RIOTBASE)/Makefile.include

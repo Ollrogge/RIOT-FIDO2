@@ -123,9 +123,14 @@ static void reset(void)
     g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_CLIENT_PIN;
     g_state.config.options |= CTAP_INFO_OPTIONS_FLAG_UP;
 
-    uint8_t aaguid[] = {CTAP_AAGUID};
-    static_assert(sizeof(aaguid) == CTAP_AAGUID_SIZE, "AAGUID has to be \
-                  128 bits long");
+    uint8_t aaguid[CTAP_AAGUID_SIZE];
+
+    if(!hexstr_to_array(CTAP_AAGUID, aaguid, sizeof(aaguid))) {
+        DEBUG("hexstr_to_array failure \n");
+        return;
+    }
+
+    print_hex(aaguid, sizeof(aaguid));
     memmove(g_state.config.aaguid, aaguid, sizeof(g_state.config.aaguid));
 
     save_state(&g_state);

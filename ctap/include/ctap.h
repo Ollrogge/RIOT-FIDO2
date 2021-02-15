@@ -405,10 +405,15 @@ extern "C" {
 /** @} */
 
 /**
+ * @brief CTAP size of authenticator AAGUID (128 bits)
+ */
+#define CTAP_AAGUID_SIZE 16
+
+/**
  * 128 bit identifier indentifying type of authenticator
  */
-#ifdef CONFIG_CTAP_AAGUID
-#define CTAP_AAGUID CONFIG_CTAP_AAGUID
+#ifdef CONFIG_CTAP_DEVICE_AAGUID
+#define CTAP_AAGUID CONFIG_CTAP_DEVICE_AAGUID
 #else
 #error Please configure ctap device AAGUID. For development you may \
         set CONFIG_CTAP_AAGUID=${CTAP_AAGUID_TESTING}
@@ -460,11 +465,6 @@ extern "C" {
  *
  */
 #define CTAP_CREDENTIAL_ID_SIZE 16U
-
-/**
- * @brief CTAP size of authenticator AAGUID
- */
-#define CTAP_AAGUID_SIZE 16
 
 /**
  * @brief CTAP state initialized marker

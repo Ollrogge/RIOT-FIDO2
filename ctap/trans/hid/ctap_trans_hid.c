@@ -1,22 +1,21 @@
 #include <string.h>
 
-#include "ctap_trans_hid.h"
-#include "ctap_trans.h"
-#include "ctap.h"
-#include "cbor.h"
-
 #ifdef CONFIG_CTAP_NATIVE
 #include <sys/time.h>
 #endif
 
-#include "ctap_utils.h"
-
 #include "xtimer.h"
+#include "cbor.h"
+
+#include "ctap_trans_hid.h"
+#include "ctap_trans.h"
+#include "ctap.h"
+#include "ctap_utils.h"
 
 #define ENABLE_DEBUG    (1)
 #include "debug.h"
 
-static uint8_t report_desc_ctap[] = {
+static const uint8_t report_desc_ctap[] = {
   0x06, 0xD0, 0xF1, // HID_UsagePage ( FIDO_USAGE_PAGE ),
   0x09, 0x01, // HID_Usage ( FIDO_USAGE_CTAPHID ),
   0xA1, 0x01, // HID_Collection ( HID_Application ),
@@ -271,7 +270,8 @@ void ctap_trans_hid_handle_packet(void *pkt_raw)
                     reset_ctap_buffer();
                     status = buffer_pkt(pkt);
                 }
-                else if (ctap_buffer.is_locked && pkt->init.cmd == CTAP_HID_COMMAND_CANCEL) {
+                else if (ctap_buffer.is_locked && pkt->init.cmd ==
+                         CTAP_HID_COMMAND_CANCEL) {
                     ctap_buffer.should_cancel = true;
                 }
                 /* random init type pkt. invalid sequence of pkts */
