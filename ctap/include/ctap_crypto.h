@@ -18,8 +18,6 @@
  *
  * @author      Nils Ollrogge <nils-ollrogge@outlook.de>
  */
-
-
 #ifndef CTAP_CRYPTO_H
 #define CTAP_CRYPTO_H
 
@@ -27,6 +25,7 @@
 
 #include "ctap.h"
 
+#include "uECC.h"
 #include "relic.h"
 
 #include "rijndael-api-fst.h"
@@ -35,23 +34,31 @@
 extern "C" {
 #endif
 
+#if IS_ACTIVE(CONFIG_CTAP_CRYPTO_MICRO_ECC)
+#define CTAP_CRYPTO_MICRO_ECC 1
+#else
+#define CTAP_CRYPTO_MICRO_ECC 0
+#endif
+
 #define CTAP_CRYPTO_P256_P_SIZE FP_BYTES
 
-struct ctap_crypto_pub_key {
+struct __attribute__((packed)) ctap_crypto_pub_key {
+#if !CTAP_CRYPTO_MICRO_ECC
     uint8_t comp_flag;
-    uint8_t x[FP_BYTES];
-    uint8_t y[FP_BYTES];
+#endif
+    uint8_t x[CTAP_P256_KEY_SIZE];
+    uint8_t y[CTAP_P256_KEY_SIZE];
 };
 
 typedef struct
 {
     struct ctap_crypto_pub_key pub;
-    uint8_t priv[FP_BYTES];
+    uint8_t priv[CTAP_P256_KEY_SIZE];
 } ctap_crypto_key_agreement_key_t;
 
 uint8_t ctap_crypto_init(void);
 
-void ctap_crypto_prng(uint8_t *dst, size_t len);
+void ctap_crypto_prng(uint8_t *buf, size_t len);
 
 int ctap_crypto_reset_key_agreement(void);
 
@@ -67,7 +74,7 @@ uint8_t ctap_crypto_aes_enc(uint8_t *out, int *out_len, uint8_t *in,
 
 uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key);
 
-uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
+uint8_t ctap_crypto_get_sig(uint8_t *hash, size_t hash_len, uint8_t *sig,
                             size_t *sig_len, const uint8_t *key, size_t key_len);
 
 uint8_t ctap_crypto_aes_ccm_enc(uint8_t *out, const uint8_t *in,

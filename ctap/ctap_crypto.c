@@ -1,4 +1,4 @@
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 #include "debug.h"
 
 #include "crypto/ciphers.h"
@@ -6,21 +6,28 @@
 
 #include "ctap_crypto.h"
 
+#include "periph/hwrng.h"
+
+#include "ctap_utils.h"
+
 #include "assert.h"
 
 static ctap_crypto_key_agreement_key_t g_ag_key;
-
-static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len);
-
+static uint8_t sig_to_der_format(uint8_t *r, uint8_t *s, uint8_t *sig, size_t *sig_len);
 static uint8_t init_key_agreement_key(ctap_crypto_key_agreement_key_t* key);
 
+#if !CTAP_CRYPTO_MICRO_ECC
 static int ecdh(uint8_t *key, int key_len, bn_t d, ec_t q);
+#endif
 
 uint8_t ctap_crypto_init(void)
 {
+    hwrng_init();
+
+#if !CTAP_CRYPTO_MICRO_ECC
     core_init();
-    rand_init();
     ep_param_set(NIST_P256);
+#endif
 
     /**
      * configuration operations upon power up
@@ -31,9 +38,19 @@ uint8_t ctap_crypto_init(void)
 
 static uint8_t init_key_agreement_key(ctap_crypto_key_agreement_key_t* key)
 {
+    int ret;
+
+#if CTAP_CRYPTO_MICRO_ECC
+    const struct uECC_Curve_t *curve = uECC_secp256r1();
+
+    ret = uECC_make_key((uint8_t*)&key->pub, key->priv, curve);
+
+    if (ret == 0) {
+        return CTAP1_ERR_OTHER;
+    }
+#else
     ec_t pub;
     bn_t priv;
-    int ret;
 
     bn_null(priv);
     ec_null(pub);
@@ -54,14 +71,14 @@ static uint8_t init_key_agreement_key(ctap_crypto_key_agreement_key_t* key)
 
     bn_free(priv);
     ec_free(pub);
+#endif
 
     return CTAP2_OK;
 }
 
-void ctap_crypto_prng(uint8_t *dst, size_t len)
+void ctap_crypto_prng(uint8_t *buf, size_t len)
 {
-    /* relic random bytes func */
-    rand_bytes(dst, len);
+    hwrng_read(buf, len);
 }
 
 int ctap_crypto_reset_key_agreement(void)
@@ -75,6 +92,7 @@ void ctap_crypto_get_key_agreement(ctap_cose_key_t *key)
     memmove(key->pubkey.y, g_ag_key.pub.y, sizeof(key->pubkey.y));
 }
 
+#if !CTAP_CRYPTO_MICRO_ECC
 /* same as cp_ecdh_key but no KDF2 */
 static int ecdh(uint8_t *key, int key_len, bn_t d, ec_t q) {
 	ec_t p;
@@ -113,11 +131,20 @@ static int ecdh(uint8_t *key, int key_len, bn_t d, ec_t q) {
 	}
 	return result;
 }
+#endif
 
 /* CTAP specification (version 20190130) section 5.5.7 */
-/* Elliptic-curve diffie hellman */
 uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose)
 {
+    int ret;
+#if CTAP_CRYPTO_MICRO_ECC
+    const struct uECC_Curve_t *curve = uECC_secp256r1();
+    ret = uECC_shared_secret((uint8_t*)&cose->pubkey, g_ag_key.priv, out, curve);
+
+    if (ret == 0) {
+        return CTAP1_ERR_OTHER;
+    }
+#else
     assert(len == FP_BYTES);
     assert(sizeof((*cose).pubkey.x) == FP_BYTES);
     assert(sizeof((*cose).pubkey.y) == FP_BYTES);
@@ -127,7 +154,6 @@ uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose)
     uint8_t bG[FP_BYTES * 2 + 1];
     ec_t pub;
     bn_t priv;
-    int ret;
 
     ec_null(pub);
     bn_null(priv);
@@ -153,7 +179,7 @@ uint8_t ctap_crypto_ecdh(uint8_t *out, size_t len, ctap_cose_key_t *cose)
     if (ret != STS_OK) {
         return CTAP1_ERR_OTHER;
     }
-
+#endif
     return CTAP2_OK;
 }
 
@@ -281,6 +307,19 @@ uint8_t ctap_crypto_aes_ccm_dec(uint8_t *out, const uint8_t *in,
 
 uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 {
+    int ret;
+#if CTAP_CRYPTO_MICRO_ECC
+    uint8_t pub_key[CTAP_P256_KEY_SIZE * 2];
+    const struct uECC_Curve_t *curve = uECC_secp256r1();
+
+    ret = uECC_make_key(pub_key, priv_key, curve);
+    if (ret == 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    memmove(key->pubkey.x, pub_key, CTAP_P256_KEY_SIZE);
+    memmove(key->pubkey.y, pub_key + CTAP_P256_KEY_SIZE, CTAP_P256_KEY_SIZE);
+#else
     ec_t pub;
     bn_t priv;
     int ret;
@@ -304,15 +343,33 @@ uint8_t ctap_crypto_gen_keypair(ctap_cose_key_t *key, uint8_t *priv_key)
 
     ec_free(pub);
     bn_free(priv);
+#endif
 
     return CTAP2_OK;
 }
 
-uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
+uint8_t ctap_crypto_get_sig(uint8_t *hash, size_t hash_len, uint8_t *sig,
                             size_t *sig_len, const uint8_t *key, size_t key_len)
 {
-    bn_t priv, r, s;
+    uint8_t r_raw[CTAP_P256_KEY_SIZE];
+    uint8_t s_raw[CTAP_P256_KEY_SIZE];
     int ret;
+
+    assert(*sig_len > CTAP_P256_KEY_SIZE * 2);
+    assert(key_len == CTAP_P256_KEY_SIZE);
+
+#if CTAP_CRYPTO_MICRO_ECC
+    const struct uECC_Curve_t *curve = uECC_secp256r1();
+    ret = uECC_sign(key, hash, hash_len, sig, curve);
+
+    if (ret == 0) {
+        return CTAP1_ERR_OTHER;
+    }
+
+    memmove(r_raw, sig, sizeof(r_raw));
+    memmove(s_raw, sig + sizeof(r_raw), sizeof(s_raw));
+#else
+    bn_t priv, r, s;
 
     bn_null(priv);
     bn_null(r);
@@ -324,48 +381,49 @@ uint8_t ctap_crypto_get_sig(uint8_t *data, size_t data_len, uint8_t *sig,
 
     bn_read_bin(priv, key, key_len);
 
-    ret = cp_ecdsa_sig(r, s, data, data_len, 1, priv);
+    ret = cp_ecdsa_sig(r, s, hash, hash_len, 1, priv);
 
     if (ret == STS_ERR) {
-        goto cleanup;
-    }
+        bn_free(priv);
+        bn_free(r);
+        bn_free(s);
 
-    ret = sig_to_der_format(r, s, sig, sig_len);
-
-cleanup:
-    bn_free(priv);
-    bn_free(r);
-    bn_free(s);
-
-    return ret != CTAP2_OK ? CTAP1_ERR_OTHER : CTAP2_OK;
-}
-
-/* Encoding signature in ASN.1 DER format */
-/* https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/TechGuidelines/TR03111/BSI-TR-03111_V-2-0_pdf.pdf?__blob=publicationFile&v=2 */
-static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len)
-{
-    if (*sig_len < CTAP_ES256_DER_MAX_SIZE) {
         return CTAP1_ERR_OTHER;
     }
-
-    uint8_t offset = 0;
-
-    uint8_t r_raw[32];
-    uint8_t s_raw[32];
-
-    uint8_t lead_r = 0;
-    uint8_t lead_s = 0;
-
-    uint8_t pad_s, pad_r;
-
-    uint8_t i;
 
     bn_write_bin(r_raw, sizeof(r_raw), r);
     bn_write_bin(s_raw, sizeof(s_raw), s);
 
+    bn_free(priv);
+    bn_free(r);
+    bn_free(s);
+#endif
+    ret = sig_to_der_format(r_raw, s_raw, sig, sig_len);
+
+    if (ret != CTAP2_OK) {
+        return ret;
+    }
+
+    return CTAP2_OK;
+}
+
+/* Encoding signature in ASN.1 DER format */
+/* https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/TechGuidelines/TR03111/BSI-TR-03111_V-2-0_pdf.pdf?__blob=publicationFile&v=2 */
+static uint8_t sig_to_der_format(uint8_t *r, uint8_t *s, uint8_t *sig, size_t *sig_len)
+{
+    uint8_t offset = 0;
+    uint8_t lead_r = 0;
+    uint8_t lead_s = 0;
+    uint8_t pad_s, pad_r;
+    uint8_t i;
+
+    if (*sig_len < CTAP_ES256_DER_MAX_SIZE) {
+        return CTAP1_ERR_OTHER;
+    }
+
     /* get leading zeros to save space */
-    for (i = 0; i < sizeof(r_raw); i++) {
-        if (r_raw[i] == 0) {
+    for (i = 0; i < CTAP_P256_KEY_SIZE; i++) {
+        if (r[i] == 0) {
             lead_r++;
         }
         else {
@@ -373,8 +431,8 @@ static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len)
         }
     }
 
-    for (i = 0; i < sizeof(s_raw); i++) {
-        if (s_raw[i] == 0) {
+    for (i = 0; i < CTAP_P256_KEY_SIZE; i++) {
+        if (s[i] == 0) {
             lead_s++;
         }
         else {
@@ -386,8 +444,8 @@ static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len)
     if number is negative after removing leading zeros,
     pad with 1 zero byte in order to turn number positive again
     */
-    pad_r = ((r_raw[lead_r] & 0x80) == 0x80);
-    pad_s = ((s_raw[lead_s] & 0x80) == 0x80);
+    pad_r = ((r[lead_r] & 0x80) == 0x80);
+    pad_s = ((s[lead_s] & 0x80) == 0x80);
 
     memset(sig, 0, *sig_len);
 
@@ -403,7 +461,7 @@ static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len)
     sig[offset++] = 0x20 + pad_r - lead_r;
     offset += pad_r;
 
-    memmove(sig + offset, r_raw + lead_r, 32 - lead_r);
+    memmove(sig + offset, r + lead_r, 32 - lead_r);
 
     offset += 32 - lead_r;
 
@@ -413,7 +471,7 @@ static uint8_t sig_to_der_format(bn_t r, bn_t s, uint8_t *sig, size_t *sig_len)
     sig[offset++] = 0x20 + pad_s - lead_s;
     offset += pad_s;
 
-    memmove(sig + offset, s_raw + lead_s, 32 - lead_s);
+    memmove(sig + offset, s + lead_s, 32 - lead_s);
 
     offset += 32 - lead_s;
 

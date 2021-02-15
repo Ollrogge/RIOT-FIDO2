@@ -4,3 +4,17 @@ config CTAP_DEVICE_AAGUID
     default "9c295865fa2c36b705a42320af9c8f16"
     help
         AAGUID needs to be 128 bits long.
+
+choice CTAP_CRYPTO_LIB
+    bool "Crypto lib to use"
+    default CTAP_CRYPTO_MICRO_ECC
+    help
+        Choose which cryptographic library you want to use
+
+config CTAP_CRYPTO_MICRO_ECC
+    bool "0"
+
+config CTAP_CRYPTO_RELIC
+    bool "1"
+
+endchoice

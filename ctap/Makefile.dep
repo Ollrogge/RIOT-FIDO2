@@ -16,6 +16,8 @@ INCLUDES += -I$(PKGDIRBASE)/relic/src/bc
 # The rest of the parameters are configuration parameters for RELIC described in its documentation.
 export RELIC_CONFIG_FLAGS=-DARCH=NONE -DOPSYS=NONE -DQUIET=off -DWORD=32 -DFP_PRIME=256 -DWITH="BN;MD;DV;FP;EP;CP;BC;EC" -DSEED=RIOTRND
 
+USEPKG += micro-ecc
+
 USEMODULE += crypto_aes
 USEMODULE += cipher_modes
 USEMODULE += hashes
